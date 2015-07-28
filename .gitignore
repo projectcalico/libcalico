@@ -7,8 +7,6 @@ env
 *~
 .coverage
 cover
-busybox.tar
-calico-node.tar
 calicobuild.created
 caliconode.created
 calico_containers/pycalico.egg-info/

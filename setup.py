@@ -9,7 +9,7 @@ setup(
     description='A Python API to Calico',
 
     # The project's main homepage.
-    url='https://github.com/Metaswitch/calico-docker/',
+    url='https://github.com/projectcalico/libcalico/',
 
     # Author details
     author='Project Calico',
