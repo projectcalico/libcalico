@@ -474,8 +474,7 @@ class DatastoreClient(object):
         """
         profiles = set()
         try:
-            etcd_profiles = self.etcd_client.read(PROFILES_PATH,
-                                                  recursive=True).children
+            etcd_profiles = self.etcd_client.read(PROFILES_PATH).children
             for child in etcd_profiles:
                 packed = child.key.split("/")
                 if len(packed) > 5:

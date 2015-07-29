@@ -1537,15 +1537,10 @@ def mock_read_no_node_bgppeers(path):
     return result
 
 
-def mock_read_2_profiles(path, recursive):
+def mock_read_2_profiles(path):
     assert path == ALL_PROFILES_PATH
-    assert recursive
     nodes = [CALICO_V_PATH + "/policy/profile/TEST",
-             CALICO_V_PATH + "/policy/profile/TEST/tags",
-             CALICO_V_PATH + "/policy/profile/TEST/rules",
-             CALICO_V_PATH + "/policy/profile/UNIT",
-             CALICO_V_PATH + "/policy/profile/UNIT/tags",
-             CALICO_V_PATH + "/policy/profile/UNIT/rules"]
+             CALICO_V_PATH + "/policy/profile/UNIT"]
     children = []
     for node in nodes:
         result = Mock(spec=EtcdResult)
@@ -1556,17 +1551,15 @@ def mock_read_2_profiles(path, recursive):
     return results
 
 
-def mock_read_no_profiles(path, recursive):
+def mock_read_no_profiles(path):
     assert path == ALL_PROFILES_PATH
-    assert recursive
     results = Mock(spec=EtcdResult)
     results.children = iter([])
     return results
 
 
-def mock_read_profiles_key_error(path, recursive):
+def mock_read_profiles_key_error(path):
     assert path == ALL_PROFILES_PATH
-    assert recursive
     raise EtcdKeyNotFound()
 
 
