@@ -172,7 +172,7 @@ class IPPool(object):
 
         e.g. IPAddress("1.2.3.4) in IPPool("1.2.3.0/24") is True.
         """
-        return IPAddress(item) in self.cidr
+        return item in self.cidr
 
     def __str__(self):
         """Return the CIDR of this pool."""
