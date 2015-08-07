@@ -13,7 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from subprocess32 import check_output, check_call
+from subprocess32 import check_output, check_call, CalledProcessError
 import socket
 import logging
 import logging.handlers
@@ -74,11 +74,34 @@ def create_veth(veth_name_host, veth_name_ns_temp):
 def remove_veth(veth_name_host):
     """
     Remove the veth (pair).
-    :param interface_name: The name of the veth interface.
-    :return: None. Raises CalledProcessError on error.
+    :param veth_name_host: The name of the veth interface.
+    :return: True if veth was removed.  False if veth does not exist.
+             Raises CalledProcessError on error.
     """
     # The veth removal is best effort. If it fails then just log.
-    check_call(['ip', 'link', 'del', veth_name_host], timeout=IP_CMD_TIMEOUT)
+    if not veth_exists(veth_name_host):
+        return False
+    check_call(['ip', 'link', 'del', veth_name_host],
+               timeout=IP_CMD_TIMEOUT)
+    return True
+
+
+def veth_exists(veth_name_host):
+    """
+    Check if the veth exists on the host.
+    :param veth_name_host: The name of the veth interface.
+    :return: True if veth exists, False if veth does not exist
+    """
+    # Suppress output
+    with open(os.devnull, 'w') as fnull:
+        try:
+            check_call(["ip", "link", "show", veth_name_host],
+                       stderr=fnull,
+                       stdout=fnull)
+            return True
+        except CalledProcessError:
+            # veth does not exist
+            return False
 
 
 def move_veth_into_ns(cpid, veth_name_ns_temp, veth_name_ns):
