@@ -18,7 +18,7 @@ import json
 import unittest
 
 from mock import ANY
-from netaddr import IPNetwork, IPAddress
+from netaddr import IPNetwork, IPAddress, AddrFormatError
 from nose.tools import *
 from mock import patch, Mock, call
 
@@ -349,6 +349,52 @@ class TestEndpoint(unittest.TestCase):
         assert_equal(endpoint.__repr__(),
                      "Endpoint(%s)" % endpoint.to_json())
 
+    @patch('pycalico.netns.create_veth', autospec=True)
+    @patch('pycalico.netns.move_veth_into_ns', autospec=True)
+    @patch('pycalico.netns.add_ip_to_ns_veth', autospec=True)
+    @patch('pycalico.netns.add_ns_default_route', autospec=True)
+    @patch('pycalico.netns.get_ns_veth_mac', autospec=True)
+    @patch('pycalico.datastore_datatypes.generate_cali_interface_name')
+    def test_provision_veth(self, m_generate_cali_interface_name,
+                            m_get_ns_veth_mac, m_add_ns_default_route,
+                            m_add_ip_to_ns_veth, m_move_veth_into_ns,
+                            m_create_veth):
+        """
+        Test provision_veth
+        """
+        # Set up mock objs
+        m_generate_cali_interface_name.return_value = 'name'
+        m_get_ns_veth_mac.return_value = 'mac'
+
+        # Set up arguments
+        endpoint = Endpoint(TEST_HOST, "docker", TEST_CONT_ID,
+                             "aabbccddeeff112233",
+                             "active", "11-22-33-44-55-66")
+        ipv4 = IPAddress('1.1.1.1')
+        ipv6 = IPAddress('201:db8::')
+        endpoint.ipv4_nets.add(IPNetwork(ipv4))
+        endpoint.ipv6_nets.add(IPNetwork(ipv6))
+        endpoint.ipv4_gateway = ipv4
+        endpoint.ipv6_gateway = ipv6
+        ns_pid = 1000000
+        veth_name_ns = 'veth_name_ns'
+
+        # Call function under test
+        function_return = endpoint.provision_veth(ns_pid, veth_name_ns)
+
+        m_create_veth.assert_called_once_with('name', 'name')
+        m_move_veth_into_ns.assert_called_once_with(ns_pid, 'name', veth_name_ns)
+        m_add_ip_to_ns_veth.assert_has_calls([
+            call(ns_pid, ipv6, veth_name_ns),
+            call(ns_pid, ipv4, veth_name_ns)
+        ])
+        m_add_ns_default_route.assert_has_calls([
+            call(ns_pid, ipv6, veth_name_ns),
+            call(ns_pid, ipv4, veth_name_ns)
+        ])
+        m_get_ns_veth_mac.assert_called_once_with(ns_pid, veth_name_ns)
+        self.assertEqual(function_return, 'mac')
+
 
 class TestBGPPeer(unittest.TestCase):
     def test_operator(self):
@@ -392,7 +438,7 @@ class TestIPPool(unittest.TestCase):
         """
         Test __str__ returns just the CIDR.
         """
-        assert_equals("1.2.3.0/24",
+        assert_equal("1.2.3.0/24",
                       str(IPPool("1.2.3.4/24", ipip=True, masquerade=True)))
 
 
@@ -1020,6 +1066,81 @@ class TestDatastoreClient(unittest.TestCase):
                                                        EP_12.to_json())
         assert_equal(EP_12._original_json, EP_12.to_json())
 
+    @patch('pycalico.datastore.DatastoreClient.get_default_next_hops', autospec=True)
+    @patch('pycalico.datastore_datatypes.generate_cali_interface_name', autospec=True)
+    def test_create_endpoint_ipv4(self, m_generate_cali_interface_name,
+                             m_get_default_next_hops):
+        """
+        Test create_endpoint
+        """
+        test_ip = IPAddress('1.1.1.1')
+
+        next_hops = {4: IPAddress("192.168.24.1"), 6: IPAddress("fd30:4500::1")}
+        m_get_default_next_hops.return_value = next_hops
+        m_generate_cali_interface_name.return_value = "name"
+
+        ep = Endpoint(TEST_HOST, TEST_ORCH_ID, TEST_CONT_ID, TEST_ENDPOINT_ID,
+                      "active", "11-22-33-44-55-66")
+        ep.ipv4_nets.add(IPNetwork(test_ip))
+        ep.ipv4_gateway = IPAddress("192.168.24.1")
+
+        ep2 = self.datastore.create_endpoint(
+            TEST_HOST, TEST_ORCH_ID, TEST_CONT_ID, [test_ip], "11-22-33-44-55-66")
+
+        assert_equal(ep.to_json(), ep2.to_json())
+
+    @patch('pycalico.datastore.DatastoreClient.get_default_next_hops', autospec=True)
+    @patch('pycalico.datastore_datatypes.generate_cali_interface_name', autospec=True)
+    def test_create_endpoint_ipv6(self, m_generate_cali_interface_name,
+                             m_get_default_next_hops):
+        """
+        Test create_endpoint
+        """
+        test_ip = IPAddress('201:db8::')
+
+        next_hops = {4: IPAddress("192.168.24.1"), 6: IPAddress("fd30:4500::1")}
+        m_get_default_next_hops.return_value = next_hops
+        m_generate_cali_interface_name.return_value = "name"
+
+        ep = Endpoint(TEST_HOST, TEST_ORCH_ID, TEST_CONT_ID, TEST_ENDPOINT_ID,
+                      "active", "11-22-33-44-55-66")
+        ep.ipv6_nets.add(IPNetwork(test_ip))
+        ep.ipv6_gateway = IPAddress("fd30:4500::1")
+
+        ep2 = self.datastore.create_endpoint(
+            TEST_HOST, TEST_ORCH_ID, TEST_CONT_ID, [test_ip], "11-22-33-44-55-66")
+
+        assert_equal(ep.to_json(), ep2.to_json())
+
+    @raises(AddrFormatError)
+    @patch('pycalico.datastore.DatastoreClient.get_default_next_hops', autospec=True)
+    @patch('pycalico.util.generate_cali_interface_name', autospec=True)
+    def test_create_endpoint_ipv6_not_configured(self, m_generate_cali_interface_name,
+                                                 m_get_default_next_hops):
+        """
+        Test create_endpoint
+        """
+        test_ip = IPAddress('201:db8::')
+
+        next_hops = {4: IPAddress("192.168.24.1")}
+        m_get_default_next_hops.return_value = next_hops
+        m_generate_cali_interface_name.return_value = "name"
+
+        self.datastore.create_endpoint(
+            TEST_HOST, TEST_ORCH_ID, TEST_CONT_ID, [test_ip], "11-22-33-44-55-66")
+
+    @patch('pycalico.datastore.DatastoreClient.get_ip_pools', autospec=True)
+    def test_get_pool(self, m_get_ip_pools):
+        """
+        Test get_pool().
+        """
+        m_get_ip_pools.return_value = \
+            [IPPool("192.168.3.0/24"), IPPool("192.168.5.0/24")]
+
+        pool = self.datastore.get_pool(IPAddress("192.168.3.5"))
+
+        assert_equal(pool, IPPool("192.168.3.0/24"))
+
     def test_remove_endpoint(self):
         """
         Test remove_endpoint().
@@ -1044,7 +1165,7 @@ class TestDatastoreClient(unittest.TestCase):
                                                      ep.to_json(),
                                                      prevValue=original_json)
         assert_not_equal(ep._original_json, original_json)
-        assert_equals(ep._original_json, ep.to_json())
+        assert_equal(ep._original_json, ep.to_json())
 
     def test_get_endpoints_exists(self):
         """

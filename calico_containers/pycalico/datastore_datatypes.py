@@ -18,6 +18,7 @@ from collections import namedtuple
 import copy
 import json
 import re
+from pycalico import netns
 
 from netaddr import IPAddress, IPNetwork
 
@@ -287,6 +288,31 @@ class Endpoint(object):
             return False
         else:
             return True
+
+    def provision_veth(self, ns_pid, veth_name_ns):
+        """
+        Create the veth, move into the container namespace, add the IP and
+        set up the default routes.
+
+        Note, the endpoint will not be updated in etcd. If desired, the user
+        should update the endpoint mac with the mac address provided
+        by the function and then call update_endpoint
+
+        :param self: The endpoint object to provision the veth on
+        :param ns_pid: The PID of the namespace to operate in
+        :param veth_name_ns: The name of the interface in the namespace
+        :return The mac address of the veth as a string
+        """
+        netns.create_veth(self.name, self.temp_interface_name)
+        netns.move_veth_into_ns(ns_pid, self.temp_interface_name, veth_name_ns)
+        for ip_net in self.ipv4_nets | self.ipv6_nets:
+            netns.add_ip_to_ns_veth(ns_pid, ip_net.ip, veth_name_ns)
+            if ip_net.ip.version == 4:
+                netns.add_ns_default_route(ns_pid, self.ipv4_gateway, veth_name_ns)
+            else:
+                netns.add_ns_default_route(ns_pid, self.ipv6_gateway, veth_name_ns)
+
+        return netns.get_ns_veth_mac(ns_pid, veth_name_ns)
 
     def __eq__(self, other):
         if not isinstance(other, Endpoint):
