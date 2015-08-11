@@ -186,7 +186,6 @@ def add_ip_to_ns_veth(container_pid, ip, veth_name_ns):
                        "dev", veth_name_ns])
 
 
-
 def remove_ip_from_ns_veth(container_pid, ip, veth_name_ns):
     """
     Remove an IP from an interface in a namespace.

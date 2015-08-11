@@ -14,6 +14,7 @@
 
 import json
 import os
+import uuid
 import etcd
 from etcd import EtcdKeyNotFound, EtcdException
 
@@ -256,6 +257,24 @@ class DatastoreClient(object):
                                                   if leaf.value]
 
         return pools
+
+    @handle_errors
+    def get_pool(self, ip):
+        """
+        Returns the first pool which contains the given IP address
+
+        :param ip: The IP address to search for
+        :return: An IPPool object that contains the given IP address or
+        None if none of the pools contain the IP address
+        """
+        pool = None
+        pools = self.get_ip_pools(ip.version)
+        for candidate_pool in pools:
+            if ip in candidate_pool:
+                pool = candidate_pool
+                break
+
+        return pool
 
     @handle_errors
     def get_ip_pool_config(self, version, cidr):
@@ -743,6 +762,46 @@ class DatastoreClient(object):
                                new_json,
                                prevValue=endpoint._original_json)
         endpoint._original_json = new_json
+
+    @handle_errors
+    def create_endpoint(self, hostname, orchestrator_id, workload_id,
+                        ip_list, mac=None):
+        """
+        Create a single new endpoint object.
+
+        Note, the endpoint will not be stored in ETCD until set_endpoint
+        or update_endpoint is called.
+
+        :param hostname: The hostname that the endpoint lives on.
+        :param orchestrator_id: The workload that the endpoint belongs to.
+        :param workload_id: The workload that the endpoint belongs to.
+        :param ip_list: A list of ip addresses that the endpoint belongs to
+        :param mac: The mac address that the endpoint belongs to
+        :return: An Endpoint Object
+        """
+        ep = Endpoint(hostname=hostname,
+                      orchestrator_id=orchestrator_id,
+                      workload_id=workload_id,
+                      endpoint_id=uuid.uuid1().hex,
+                      state="active",
+                      mac=mac)
+        next_hops = self.get_default_next_hops(hostname)
+
+        for ip in ip_list:
+            try:
+                next_hop = next_hops[ip.version]
+            except KeyError:
+                raise AddrFormatError("This node is not configured for IPv%d."
+                                       % ip.version)
+            network = IPNetwork(ip)
+            if network.version == 4:
+                ep.ipv4_nets.add(network)
+                ep.ipv4_gateway = next_hop
+            else:
+                ep.ipv6_nets.add(network)
+                ep.ipv6_gateway = next_hop
+
+        return ep
 
     @handle_errors
     def remove_endpoint(self, endpoint):

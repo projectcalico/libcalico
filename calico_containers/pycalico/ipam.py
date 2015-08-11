@@ -18,6 +18,7 @@ from netaddr import IPAddress, IPNetwork
 
 from pycalico.datastore_datatypes import IPPool
 from pycalico.datastore import CALICO_V_PATH, DatastoreClient, handle_errors
+from pycalico.datastore_errors import PoolNotFound
 
 IP_VERSION_PATH = CALICO_V_PATH + "/ipam/v%(version)s"
 IP_ASSIGNMENT_PATH = IP_VERSION_PATH + "/assignment/%(pool)s"
@@ -85,12 +86,17 @@ class IPAMClient(DatastoreClient):
         The directory for storing assignments in this pool must already exist.
 
         :param IPPool or IPNetwork pool: The pool that the assignment is from.
+        If pool is None, get the pool from datastore
         :param IPAddress address: The address to assign.
-
         :return: True if the allocation succeeds, false otherwise. An
         exception is thrown for any error conditions.
         :rtype: bool
         """
+        pool = pool or self.get_pool(address)
+        if pool is None:
+            raise PoolNotFound("IP address %s does not belong to any "
+                                 "configured pools" % address)
+
         if isinstance(pool, IPPool):
             pool = pool.cidr
         assert isinstance(pool, IPNetwork)
@@ -112,12 +118,17 @@ class IPAMClient(DatastoreClient):
         Unassign an IP from a pool.
 
         :param IPPool or IPNetwork pool: The pool that the assignment is from.
+        If the pool is None, get the pool from datastore
         :param IPAddress address: The address to unassign.
-
         :return: True if the address was unassigned, false otherwise. An
         exception is thrown for any error conditions.
         :rtype: bool
         """
+        pool = pool or self.get_pool(address)
+        if pool is None:
+            raise PoolNotFound("IP address %s does not belong to any "
+                                 "configured pools" % address)
+
         if isinstance(pool, IPPool):
             pool = pool.cidr
         assert isinstance(pool, IPNetwork)

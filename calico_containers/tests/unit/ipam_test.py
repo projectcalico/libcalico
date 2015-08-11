@@ -12,10 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from netaddr import IPNetwork, IPAddress
-from nose.tools import assert_equal, assert_true, assert_false
+from nose.tools import assert_equal, assert_true, assert_false, assert_raises
+from mock import patch
 
 from pycalico.ipam import SequentialAssignment, IPAMClient
 from pycalico.datastore_datatypes import IPPool
+from pycalico.datastore_errors import PoolNotFound
 
 network = IPNetwork("192.168.0.0/16")
 pool = IPPool(network)
@@ -42,6 +44,20 @@ class TestIPAMClient:
         assert_equal(client.get_assigned_addresses(pool), one_assigned)
 
     def test_remove_assignment(self):
+        address = IPAddress("192.168.0.1")
+        assert_equal(client.get_assigned_addresses(pool), {})
+        assert_true(client.assign_address(pool, address))
+        assert_true(client.unassign_address(pool, address))
+        assert_equal(client.get_assigned_addresses(pool), {})
+
+    def test_remove_assignment_no_pool(self):
+        address = IPAddress("192.168.0.1")
+        assert_raises(PoolNotFound, client.assign_address, None, address)
+        assert_raises(PoolNotFound, client.unassign_address, None, address)
+
+    @patch('pycalico.ipam.IPAMClient.get_pool', autospec=True)
+    def test_remove_assignment_no_pool_patched(self, m_get_pool):
+        m_get_pool.return_value = pool
         address = IPAddress("192.168.0.1")
         assert_equal(client.get_assigned_addresses(pool), {})
         assert_true(client.assign_address(pool, address))
