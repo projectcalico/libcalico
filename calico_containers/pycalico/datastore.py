@@ -425,7 +425,7 @@ class DatastoreClient(object):
             return True
 
     @handle_errors
-    def create_profile(self, name):
+    def create_profile(self, name, rules=None):
         """
         Create a policy profile.  By default, endpoints in a profile
         accept traffic only from other endpoints in that profile, but can send
@@ -434,6 +434,9 @@ class DatastoreClient(object):
         Note this will clobber any existing profile with this name.
 
         :param name: Unique string name for the profile.
+        :param rules: Optional Rules to set on the profile. If not specified,
+        default "allow all" Rules will be set.
+        :type rules Rules
         :return: nothing.
         """
         profile_path = PROFILE_PATH % {"profile_id": name}
@@ -446,9 +449,9 @@ class DatastoreClient(object):
         # be accepted by another profile on the endpoint.
         accept_self = Rule(action="allow", src_tag=name)
         default_allow = Rule(action="allow")
-        rules = Rules(id=name,
-                      inbound_rules=[accept_self],
-                      outbound_rules=[default_allow])
+        rules = rules or Rules(id=name,
+                               inbound_rules=[accept_self],
+                               outbound_rules=[default_allow])
         self.etcd_client.write(profile_path + "rules", rules.to_json())
 
     @handle_errors

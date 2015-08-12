@@ -915,6 +915,18 @@ class TestDatastoreClient(unittest.TestCase):
                           call(TEST_PROFILE_PATH + "rules", rules.to_json())]
         self.etcd_client.write.assert_has_calls(expected_calls, any_order=True)
 
+    def test_create_profile_with_rules(self):
+        """
+        Test create_profile() with rules specified
+        """
+        rules = Rules(id="TEST",
+                      inbound_rules=[Rule(action="deny")],
+                      outbound_rules=[Rule(action="allow")])
+        self.datastore.create_profile("TEST", rules)
+        expected_calls = [call(TEST_PROFILE_PATH + "tags", '["TEST"]'),
+                          call(TEST_PROFILE_PATH + "rules", rules.to_json())]
+        self.etcd_client.write.assert_has_calls(expected_calls, any_order=True)
+
     def test_delete_profile(self):
         """
         Test deleting a policy profile.
