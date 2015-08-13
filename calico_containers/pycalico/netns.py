@@ -138,6 +138,23 @@ def set_veth_mac(veth_name_host, mac):
                timeout=IP_CMD_TIMEOUT)
 
 
+def add_default_route(next_hop, veth_name_ns_temp):
+    """
+    Add a default route to an interface (not in a namespace).
+
+    :param next_hop: The next hop IP used as the default route in the namespace.
+    :param veth_name_ns_temp: The temporary interface name of the veth that will
+    eventually be moved into the namespace.
+    :return: None. Raises CalledProcessError on error.
+    """
+    assert isinstance(next_hop, IPAddress)
+    # Connected route to next hop & default route.
+    check_call(["ip", "-%s" % next_hop.version, "route", "replace",
+                str(next_hop), "dev", veth_name_ns_temp])
+    check_call(["ip", "-%s" % next_hop.version, "route", "replace",
+                "default", "via", str(next_hop), "dev", veth_name_ns_temp])
+
+
 def add_ns_default_route(cpid, next_hop, veth_name_ns):
     """
     Add a default route to the namespace.
@@ -169,6 +186,19 @@ def get_ns_veth_mac(cpid, veth_name_ns):
         mac = ns.check_output(["cat", "/sys/class/net/%s/address" % veth_name_ns]).strip()
     #TODO MAC should be an EUI object.
     return mac
+
+
+def add_ip_to_veth(ip, veth_name_ns_temp):
+    """
+    Add an IP to an interface (not in any namespace).
+
+    :param ip: The IPAddress to add
+    :param veth_name_ns_temp: The temporary interface name of the target veth
+    :return
+    """
+    check_call(["ip", "-%s" % ip.version, "addr", "add",
+                       "%s/%s" % (ip, PREFIX_LEN[ip.version]),
+                       "dev", veth_name_ns_temp])
 
 
 def add_ip_to_ns_veth(container_pid, ip, veth_name_ns):
