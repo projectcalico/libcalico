@@ -458,6 +458,10 @@ class TestDatastoreClient(unittest.TestCase):
         Test ensure_global_config when it doesn't already exist.
         """
         int_prefix_path = CONFIG_PATH + "InterfacePrefix"
+        log_file_path = CONFIG_PATH + "LogSeverityFile"
+        log_screen_path = CONFIG_PATH + "LogSeverityScreen"
+        log_file_path_path = CONFIG_PATH + "LogFilePath"
+        ipip_path = CONFIG_PATH + "IpInIpEnabled"
         self.etcd_client.read.side_effect = EtcdKeyNotFound
 
         # We only write the interface prefix if there is no entry in the
@@ -468,11 +472,19 @@ class TestDatastoreClient(unittest.TestCase):
         self.datastore.ensure_global_config()
         expected_reads = [call(int_prefix_path),
                           call(BGP_NODE_DEF_AS_PATH),
-                          call(BGP_NODE_MESH_PATH)]
+                          call(BGP_NODE_MESH_PATH),
+                          call(log_file_path),
+                          call(log_screen_path),
+                          call(log_file_path_path),
+                          call(ipip_path)]
         self.etcd_client.read.assert_has_calls(expected_reads)
         expected_writes = [call(int_prefix_path, "cali"),
                            call(BGP_NODE_DEF_AS_PATH, 64511),
                            call(BGP_NODE_MESH_PATH, json.dumps({"enabled": True})),
+                           call(log_file_path, "none"),
+                           call(log_screen_path, "info"),
+                           call(log_file_path_path, "none"),
+                           call(ipip_path, "true"),
                            call(CALICO_V_PATH + "/Ready", "true")]
         self.etcd_client.write.assert_has_calls(expected_writes)
 
@@ -480,10 +492,19 @@ class TestDatastoreClient(unittest.TestCase):
         """
         Test ensure_global_config() when it already exists.
         """
+        int_prefix_path = CONFIG_PATH + "InterfacePrefix"
+        log_file_path = CONFIG_PATH + "LogSeverityFile"
+        log_screen_path = CONFIG_PATH + "LogSeverityScreen"
+        log_file_path_path = CONFIG_PATH + "LogFilePath"
+        ipip_path = CONFIG_PATH + "IpInIpEnabled"
         self.datastore.ensure_global_config()
-        expected_reads = [call(CONFIG_PATH + "InterfacePrefix"),
+        expected_reads = [call(int_prefix_path),
                           call(BGP_NODE_DEF_AS_PATH),
-                          call(BGP_NODE_MESH_PATH)]
+                          call(BGP_NODE_MESH_PATH),
+                          call(log_file_path),
+                          call(log_screen_path),
+                          call(log_file_path_path),
+                          call(ipip_path)]
         self.etcd_client.read.assert_has_calls(expected_reads)
 
     def test_ensure_global_config_exists_etcd_exc(self):
