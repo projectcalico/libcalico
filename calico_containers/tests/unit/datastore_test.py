@@ -16,6 +16,7 @@ from etcd import Client as EtcdClient
 from etcd import EtcdKeyNotFound, EtcdResult, EtcdException
 import json
 import unittest
+from pycalico import netns
 
 from mock import ANY
 from netaddr import IPNetwork, IPAddress, AddrFormatError
@@ -380,19 +381,20 @@ class TestEndpoint(unittest.TestCase):
         veth_name_ns = 'veth_name_ns'
 
         # Call function under test
-        function_return = endpoint.provision_veth(ns_pid, veth_name_ns)
+        namespace = netns.PidNamespace(ns_pid)
+        function_return = endpoint.provision_veth(namespace, veth_name_ns)
 
         m_create_veth.assert_called_once_with('name', 'name')
-        m_move_veth_into_ns.assert_called_once_with(ns_pid, 'name', veth_name_ns)
+        m_move_veth_into_ns.assert_called_once_with(namespace, 'name', veth_name_ns)
         m_add_ip_to_ns_veth.assert_has_calls([
-            call(ns_pid, ipv6, veth_name_ns),
-            call(ns_pid, ipv4, veth_name_ns)
+            call(namespace, ipv6, veth_name_ns),
+            call(namespace, ipv4, veth_name_ns)
         ])
         m_add_ns_default_route.assert_has_calls([
-            call(ns_pid, ipv6, veth_name_ns),
-            call(ns_pid, ipv4, veth_name_ns)
+            call(namespace, ipv6, veth_name_ns),
+            call(namespace, ipv4, veth_name_ns)
         ])
-        m_get_ns_veth_mac.assert_called_once_with(ns_pid, veth_name_ns)
+        m_get_ns_veth_mac.assert_called_once_with(namespace, veth_name_ns)
         self.assertEqual(function_return, 'mac')
 
 
