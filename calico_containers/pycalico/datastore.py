@@ -65,11 +65,26 @@ BGP_HOST_AS_PATH = BGP_HOST_PATH + "as_num"
 BGP_HOST_PEERS_PATH = BGP_HOST_PATH + "peer_v%(version)s/"
 BGP_HOST_PEER_PATH = BGP_HOST_PATH + "peer_v%(version)s/%(peer_ip)s"
 
+# Global configuration
+IP_IN_IP_PATH = CONFIG_PATH + "IpInIpEnabled"
+LOG_SEVERITY_FILE_PATH = CONFIG_PATH + "LogSeverityFile"
+LOG_SEVERITY_SCREEN_PATH = CONFIG_PATH + "LogSeverityScreen"
+LOG_FILE_PATH_PATH = CONFIG_PATH + "LogFilePath"
+
 # The default node AS number.
 DEFAULT_AS_NUM = 64511
 
 # The default node mesh configuration.
 DEFAULT_NODE_MESH = {"enabled": True}
+
+# Default logging configuration.
+DEFAULT_LOG_SEVERITY_FILE = "none"
+DEFAULT_LOG_SEVERITY_SCREEN = "info"
+DEFAULT_LOG_FILE_PATH = "none"
+
+# Default global IP in IP.
+DEFAULT_IP_IN_IP = "true"
+
 
 def handle_errors(fn):
     """
@@ -108,36 +123,41 @@ class DatastoreClient(object):
         :return: None.
         """
         # Configure Felix config.
-        try:
-            self.etcd_client.read(CONFIG_IF_PREF_PATH)
-        except EtcdKeyNotFound:
-            # Didn't exist, create it now.
-            self.etcd_client.write(CONFIG_IF_PREF_PATH, IF_PREFIX)
+        self._write_global_config(CONFIG_IF_PREF_PATH, IF_PREFIX)
 
         # Configure IPAM directory structures (to ensure confd is able to
         # watch appropriate directory trees).
-        try:
-            self.etcd_client.read(CONFIG_IF_PREF_PATH)
-        except EtcdKeyNotFound:
-            # Didn't exist, create it now.
-            self.etcd_client.write(CONFIG_IF_PREF_PATH, IF_PREFIX)
+        self.etcd_client.write(CONFIG_IF_PREF_PATH, IF_PREFIX)
 
         # Configure BGP global (default) config if it doesn't exist.
-        try:
-            self.etcd_client.read(BGP_NODE_DEF_AS_PATH)
-        except EtcdKeyNotFound:
-            # Didn't exist, create it now.
-            self.etcd_client.write(BGP_NODE_DEF_AS_PATH, DEFAULT_AS_NUM)
+        self._write_global_config(BGP_NODE_DEF_AS_PATH, DEFAULT_AS_NUM)
+        self._write_global_config(BGP_NODE_MESH_PATH,
+                                  json.dumps(DEFAULT_NODE_MESH))
 
-        try:
-            self.etcd_client.read(BGP_NODE_MESH_PATH)
-        except EtcdKeyNotFound:
-            # Didn't exist, create it now.
-            self.etcd_client.write(BGP_NODE_MESH_PATH,
-                                   json.dumps(DEFAULT_NODE_MESH))
+        # Configure logging levels.
+        self._write_global_config(LOG_SEVERITY_FILE_PATH,
+                                  DEFAULT_LOG_SEVERITY_FILE)
+        self._write_global_config(LOG_SEVERITY_SCREEN_PATH,
+                                  DEFAULT_LOG_SEVERITY_SCREEN)
+        self._write_global_config(LOG_FILE_PATH_PATH,
+                                  DEFAULT_LOG_FILE_PATH)
+
+        # IP in IP is enabled globally.
+        self._write_global_config(IP_IN_IP_PATH, DEFAULT_IP_IN_IP)
 
         # We are always ready.
         self.etcd_client.write(CALICO_V_PATH + "/Ready", "true")
+
+    def _write_global_config(self, key, value):
+        """
+        Write global config into the datastore if it does not already exist.
+        :param key: The configuration key.
+        :param value: The configuration value.
+        """
+        try:
+            self.etcd_client.read(key)
+        except EtcdKeyNotFound:
+            self.etcd_client.write(key, value)
 
     @handle_errors
     def create_host(self, hostname, ipv4, ipv6, as_num):
