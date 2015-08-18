@@ -213,7 +213,7 @@ class NamedNamespace(object):
     """
     def __init__(self, cpid):
         self.name = uuid.uuid1().hex
-        self.pid_dir = "/proc/%s/ns/net" % cpid
+        self.pid_dir = cpid
         self.nsn_dir = "/var/run/netns/%s" % self.name
         if not os.path.exists(self.pid_dir):
             raise NamespaceError("Namespace pseudofile %s does not exist." %
