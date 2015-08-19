@@ -104,17 +104,18 @@ def veth_exists(veth_name_host):
             return False
 
 
-def move_veth_into_ns(cpid, veth_name_ns_temp, veth_name_ns):
+def move_veth_into_ns(namespace, veth_name_ns_temp, veth_name_ns):
     """
     Move the veth into the namespace.
 
-    :param cpid: The PID of a process currently running in the namespace.
+    :param namespace: The Namespace to move the veth into.
+    :type namespace Namespace
     :param veth_name_ns_temp: The temporary interface name of the veth that will be
     moved into the namespace.
     :param veth_name_ns: The name of the interface in the namespace.
     :return: None. Raises CalledProcessError on error.
     """
-    with NamedNamespace(cpid) as ns:
+    with NamedNamespace(namespace) as ns:
         # Create the veth pair and move one end into container:
         check_call(["ip", "link", "set", veth_name_ns_temp,
                     "netns", ns.name],
@@ -138,17 +139,18 @@ def set_veth_mac(veth_name_host, mac):
                timeout=IP_CMD_TIMEOUT)
 
 
-def add_ns_default_route(cpid, next_hop, veth_name_ns):
+def add_ns_default_route(namespace, next_hop, veth_name_ns):
     """
     Add a default route to the namespace.
 
-    :param cpid: The PID of a process currently running in the namespace.
+    :param namespace: The namespace to operate in.
+    :type namespace Namespace
     :param next_hop: The next hop IP used as the default route in the namespace.
     :param veth_name_ns: The name of the interface in the namespace.
     :return: None. Raises CalledProcessError on error.
     """
     assert isinstance(next_hop, IPAddress)
-    with NamedNamespace(cpid) as ns:
+    with NamedNamespace(namespace) as ns:
         # Connected route to next hop & default route.
         ns.check_call(["ip", "-%s" % next_hop.version, "route", "replace",
                        str(next_hop), "dev", veth_name_ns])
@@ -156,47 +158,50 @@ def add_ns_default_route(cpid, next_hop, veth_name_ns):
                       "default", "via", str(next_hop), "dev", veth_name_ns])
 
 
-def get_ns_veth_mac(cpid, veth_name_ns):
+def get_ns_veth_mac(namespace, veth_name_ns):
     """
     Return the MAC address of the interface in the namespace.
 
-    :param cpid: The PID of a process currently running in the namespace.
+    :param namespace: The namespace to operate in.
+    :type namespace Namespace
     :param veth_name_ns: The name of the interface in the namespace.
     :return: The MAC address as a string. Raises CalledProcessError on error.
     """
-    with NamedNamespace(cpid) as ns:
+    with NamedNamespace(namespace) as ns:
         # Get the MAC address.
         mac = ns.check_output(["cat", "/sys/class/net/%s/address" % veth_name_ns]).strip()
     #TODO MAC should be an EUI object.
     return mac
 
 
-def add_ip_to_ns_veth(container_pid, ip, veth_name_ns):
+def add_ip_to_ns_veth(namespace, ip, veth_name_ns):
     """
     Add an IP to an interface in a namespace.
 
-    :param container_pid: The PID of the namespace to operate in.
+    :param namespace: The namespace to operate in.
+    :type namespace Namespace
     :param ip: The IPAddress to add.
     :param veth_name_ns: The interface to add the address to.
     :return: None. Raises CalledProcessError on error.
     """
-    with NamedNamespace(container_pid) as ns:
+    with NamedNamespace(namespace) as ns:
         ns.check_call(["ip", "-%s" % ip.version, "addr", "add",
                        "%s/%s" % (ip, PREFIX_LEN[ip.version]),
                        "dev", veth_name_ns])
 
 
-def remove_ip_from_ns_veth(container_pid, ip, veth_name_ns):
+def remove_ip_from_ns_veth(namespace, ip, veth_name_ns):
     """
     Remove an IP from an interface in a namespace.
 
-    :param container_pid: The PID of the namespace to operate in.
+    :param namespace: The namespace to operate in.
+    :type namespace Namespace
     :param ip: The IPAddress to remove.
     :param veth_name_ns: The interface to remove the address from.
     :return: None. raises CalledProcessError on error.
     """
     assert isinstance(ip, IPAddress)
-    with NamedNamespace(container_pid) as ns:
+    with NamedNamespace(namespace) as ns:
         ns.check_call(["ip", "-%s" % ip.version, "addr", "del",
                        "%s/%s" % (ip, PREFIX_LEN[ip.version]),
                        "dev", "%(device)s" % veth_name_ns])
@@ -204,20 +209,26 @@ def remove_ip_from_ns_veth(container_pid, ip, veth_name_ns):
 
 class NamedNamespace(object):
     """
-    Create a named namespace from a PID namespace to allow us to run commands
+    Create a named namespace to allow us to run commands
     from within the namespace using standard `ip netns exec`.
 
     An alternative approach would be to use nsenter, which allows us to exec
     directly in a PID namespace.  However, this is not installed by default
     on some OSs that we need to support.
     """
-    def __init__(self, cpid):
+    def __init__(self, namespace):
+        """
+        Create a NamedNamespace from a Namespace object.
+
+        :param namespace: The source namespace to link to.
+        :type namespace Namespace
+        """
         self.name = uuid.uuid1().hex
-        self.pid_dir = cpid
+        self.ns_path = namespace.path
         self.nsn_dir = "/var/run/netns/%s" % self.name
-        if not os.path.exists(self.pid_dir):
+        if not os.path.exists(self.ns_path):
             raise NamespaceError("Namespace pseudofile %s does not exist." %
-                                 self.pid_dir)
+                                 self.ns_path)
 
     def __enter__(self):
         """
@@ -225,14 +236,14 @@ class NamedNamespace(object):
         the PID to the namespace name.
         """
         _log.debug("Creating link between namespace %s and PID %s",
-                   self.name, self.pid_dir)
+                   self.name, self.ns_path)
         try:
             os.makedirs("/var/run/netns")
         except os.error as oserr:
             if oserr.errno != errno.EEXIST:
                 _log.error("Unable to create /var/run/netns dir")
                 raise
-        os.symlink(self.pid_dir, self.nsn_dir)
+        os.symlink(self.ns_path, self.nsn_dir)
         return self
 
     def __exit__(self, _type, _value, _traceback):
@@ -283,3 +294,13 @@ class NamespaceError(Exception):
     Error creating or manipulating a network namespace.
     """
     pass
+
+
+class Namespace(object):
+    def __init__(self, path):
+        self.path = path
+
+
+class PidNamespace(Namespace):
+    def __init__(self, pid):
+        super(PidNamespace, self).__init__("/proc/%s/ns/net" % pid)
