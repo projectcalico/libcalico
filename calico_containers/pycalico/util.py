@@ -39,7 +39,8 @@ def get_host_ips(version=4, exclude=None):
     raising any exceptions.
 
     :param version: Desired version of IP addresses. Can be 4 or 6. defaults to 4
-    :param exclude: list of interfaces (strings) to ignore (ex. ["lo","docker0"])
+    :param exclude: list of interface name regular expressions to ignore
+                    (ex. ["^lo$","docker0.*"])
     :return: List of string representations of IP Addresses.
     """
     exclude = exclude or []
@@ -57,9 +58,11 @@ def get_host_ips(version=4, exclude=None):
 
     # Separate interface blocks from ip addr output and iterate.
     for iface_block in INTERFACE_SPLIT_RE.findall(ip_addr_output):
-        # Exclude certain interfaces.
+        # Try to get the interface name from the block
         match = IFACE_RE.match(iface_block)
-        if match and match.group(1) not in exclude:
+        iface = match.group(1)
+        # Ignore the interface if it is explicitly excluded
+        if match and not any(re.match(regex, iface) for regex in exclude):
             # Iterate through Addresses on interface.
             for address in IP_RE.findall(iface_block):
                 # Append non-loopback addresses.
