@@ -204,7 +204,7 @@ def remove_ip_from_ns_veth(namespace, ip, veth_name_ns):
     with NamedNamespace(namespace) as ns:
         ns.check_call(["ip", "-%s" % ip.version, "addr", "del",
                        "%s/%s" % (ip, PREFIX_LEN[ip.version]),
-                       "dev", "%(device)s" % veth_name_ns])
+                       "dev", veth_name_ns])
 
 
 class NamedNamespace(object):
