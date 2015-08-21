@@ -27,4 +27,3 @@ RUN tar -zxvf /tmp/etcd.tar.gz -C /tmp --strip-components=1
 # that the right branch can be included if uploading coverage.
 ADD requirements.txt /code/
 RUN pip install -r requirements.txt
-RUN pip install git+https://github.com/Metaswitch/python-etcd.git
