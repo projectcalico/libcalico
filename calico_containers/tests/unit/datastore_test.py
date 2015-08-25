@@ -486,7 +486,7 @@ class TestDatastoreClient(unittest.TestCase):
                            call(log_file_path, "none"),
                            call(log_screen_path, "info"),
                            call(log_file_path_path, "none"),
-                           call(ipip_path, "true"),
+                           call(ipip_path, "false"),
                            call(CALICO_V_PATH + "/Ready", "true")]
         self.etcd_client.write.assert_has_calls(expected_writes)
 
@@ -909,10 +909,16 @@ class TestDatastoreClient(unittest.TestCase):
         Test adding an IP pool when the directory exists, but pool doesn't.
         :return: None
         """
+        # Return false for the IP in IP global setting.
+        ipip_disabled_value = Mock(EtcdResult)
+        ipip_disabled_value.value = "false"
+        self.etcd_client.read.return_value = ipip_disabled_value
+
         pool = IPPool("192.168.100.5/24", ipip=True, masquerade=True)
         self.datastore.add_ip_pool(4, pool)
-        self.etcd_client.write.assert_called_once_with(IPV4_POOLS_PATH + "192.168.100.0-24",
-                                                       ANY)
+        self.etcd_client.write.assert_has_calls(
+                             [call(CONFIG_PATH + "IpInIpEnabled", "true"),
+                              call(IPV4_POOLS_PATH + "192.168.100.0-24", ANY)])
         raw_data = self.etcd_client.write.call_args[0][1]
         data = json.loads(raw_data)
         self.assertEqual(data, {'cidr': '192.168.100.0/24',
@@ -923,8 +929,8 @@ class TestDatastoreClient(unittest.TestCase):
         self.etcd_client.write.reset_mock()
         pool = IPPool("192.168.100.5/24")
         self.datastore.add_ip_pool(4, pool)
-        self.etcd_client.write.assert_called_once_with(IPV4_POOLS_PATH + "192.168.100.0-24",
-                                                       ANY)
+        self.etcd_client.write.assert_called_once_with(
+                                     IPV4_POOLS_PATH + "192.168.100.0-24", ANY)
         raw_data = self.etcd_client.write.call_args[0][1]
         data = json.loads(raw_data)
         self.assertEqual(data, {'cidr': '192.168.100.0/24'})
