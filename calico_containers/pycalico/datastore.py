@@ -82,8 +82,10 @@ DEFAULT_LOG_SEVERITY_FILE = "none"
 DEFAULT_LOG_SEVERITY_SCREEN = "info"
 DEFAULT_LOG_FILE_PATH = "none"
 
-# Default global IP in IP.
-DEFAULT_IP_IN_IP = "true"
+# Global IP in IP disabled and enabled values.  By default, IPIP is disabled
+# and only enabled when the first IP Pool with IPIP is configured.
+IP_IN_IP_DISABLED = "false"
+IP_IN_IP_ENABLED = "true"
 
 
 def handle_errors(fn):
@@ -143,7 +145,7 @@ class DatastoreClient(object):
                                   DEFAULT_LOG_FILE_PATH)
 
         # IP in IP is enabled globally.
-        self._write_global_config(IP_IN_IP_PATH, DEFAULT_IP_IN_IP)
+        self._write_global_config(IP_IN_IP_PATH, IP_IN_IP_DISABLED)
 
         # We are always ready.
         self.etcd_client.write(CALICO_V_PATH + "/Ready", "true")
@@ -336,6 +338,14 @@ class DatastoreClient(object):
         assert version in (4, 6)
         assert isinstance(pool, IPPool)
 
+        # If IP in IP is enabled on the pool, ensure that it is enabled
+        # globally.
+        if pool.ipip:
+            result = self.etcd_client.read(IP_IN_IP_PATH)
+            if result.value != IP_IN_IP_ENABLED:
+                self.etcd_client.write(IP_IN_IP_PATH, IP_IN_IP_ENABLED)
+
+        # Now write the pool configuration.
         key = IP_POOL_KEY % {"version": str(version),
                              "pool": str(pool.cidr).replace("/", "-")}
         self.etcd_client.write(key, pool.to_json())
