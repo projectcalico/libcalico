@@ -84,10 +84,13 @@ class BGPPeer(object):
         """
         Constructor.
         :param ip: The BGPPeer IP address (string or IPAddress)
-        :param as_num: The AS Number (string or int)
+        :param as_num: The AS Number (string or int).
         """
         self.ip = IPAddress(ip)
-        self.as_num = int(as_num)
+
+        # Store the AS number as a string.  This allows dotted notation of
+        # AS numbers.
+        self.as_num = str(as_num)
 
     def to_json(self):
         """

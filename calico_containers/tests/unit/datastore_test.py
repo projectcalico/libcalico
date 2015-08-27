@@ -481,7 +481,7 @@ class TestDatastoreClient(unittest.TestCase):
                           call(ipip_path)]
         self.etcd_client.read.assert_has_calls(expected_reads)
         expected_writes = [call(int_prefix_path, "cali"),
-                           call(BGP_NODE_DEF_AS_PATH, 64511),
+                           call(BGP_NODE_DEF_AS_PATH, "64511"),
                            call(BGP_NODE_MESH_PATH, json.dumps({"enabled": True})),
                            call(log_file_path, "none"),
                            call(log_screen_path, "info"),
@@ -1381,7 +1381,7 @@ class TestDatastoreClient(unittest.TestCase):
             assert_equal(key, BGP_PEERS_PATH + "192.168.100.5")
             value = json.loads(value)
             assert_dict_equal(value,
-                              {"as_num": 32245, "ip": "192.168.100.5"})
+                              {"as_num": "32245", "ip": "192.168.100.5"})
             data["write"] = True
 
         self.etcd_client.write.side_effect = mock_write
@@ -1449,7 +1449,7 @@ class TestDatastoreClient(unittest.TestCase):
             assert_equal(key, TEST_NODE_BGP_PEERS_PATH + "192.169.100.5")
             value = json.loads(value)
             assert_dict_equal(value,
-                              {"as_num": 32245, "ip": "192.169.100.5"})
+                              {"as_num": "32245", "ip": "192.169.100.5"})
             data["write"] = True
 
         self.etcd_client.write.side_effect = mock_write
@@ -1524,7 +1524,7 @@ class TestDatastoreClient(unittest.TestCase):
         """
         self.datastore.set_default_node_as(12345)
         self.etcd_client.write.assert_called_once_with(BGP_NODE_DEF_AS_PATH,
-                                                       12345)
+                                                       "12345")
 
     def test_get_default_node_as(self):
         """
@@ -1535,11 +1535,11 @@ class TestDatastoreClient(unittest.TestCase):
         def mock_read(path):
             assert_equal(path, BGP_NODE_DEF_AS_PATH)
             result = Mock(spec=EtcdResult)
-            result.value = 24245
+            result.value = "24245"
             return result
         self.etcd_client.read = mock_read
 
-        assert_equal(self.datastore.get_default_node_as(), 24245)
+        assert_equal(self.datastore.get_default_node_as(), "24245")
 
     def test_get_default_node_as_no_config(self):
         """
@@ -1548,7 +1548,7 @@ class TestDatastoreClient(unittest.TestCase):
         :return: None.
         """
         self.etcd_client.read.side_effect = EtcdKeyNotFound()
-        assert_equal(self.datastore.get_default_node_as(), 64511)
+        assert_equal(self.datastore.get_default_node_as(), "64511")
 
     def test_get_host_bgp_ips(self):
         """
@@ -1597,7 +1597,7 @@ def mock_read_2_peers(path):
     children = []
     for ip in ["192.168.3.1", "192.168.5.1"]:
         node = Mock(spec=EtcdResult)
-        node.value = "{\"ip\": \"%s\", \"as_num\": 32245}" % ip
+        node.value = "{\"ip\": \"%s\", \"as_num\": \"32245\"}" % ip
         node.key = BGP_PEERS_PATH + str(ip)
         children.append(node)
     result.children = iter(children)
@@ -1615,7 +1615,7 @@ def mock_read_2_node_peers(path):
     children = []
     for ip in ["192.169.3.1", "192.169.5.1"]:
         node = Mock(spec=EtcdResult)
-        node.value = "{\"ip\": \"%s\", \"as_num\": 32245}" % ip
+        node.value = "{\"ip\": \"%s\", \"as_num\": \"32245\"}" % ip
         node.key = TEST_NODE_BGP_PEERS_PATH + str(ip)
         children.append(node)
     result.children = iter(children)
