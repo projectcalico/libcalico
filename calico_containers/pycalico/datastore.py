@@ -132,7 +132,7 @@ class DatastoreClient(object):
         self.etcd_client.write(CONFIG_IF_PREF_PATH, IF_PREFIX)
 
         # Configure BGP global (default) config if it doesn't exist.
-        self._write_global_config(BGP_NODE_DEF_AS_PATH, DEFAULT_AS_NUM)
+        self._write_global_config(BGP_NODE_DEF_AS_PATH, str(DEFAULT_AS_NUM))
         self._write_global_config(BGP_NODE_MESH_PATH,
                                   json.dumps(DEFAULT_NODE_MESH))
 
@@ -948,14 +948,14 @@ class DatastoreClient(object):
 
         :return: The default node BGP AS Number.
         """
-        self.etcd_client.write(BGP_NODE_DEF_AS_PATH, as_num)
+        self.etcd_client.write(BGP_NODE_DEF_AS_PATH, str(as_num))
 
     @handle_errors
     def get_default_node_as(self):
         """
         Return the default node BGP AS Number.
 
-        :return: The default node BGP AS Number.
+        :return: The default node BGP AS Number as a string.
         """
         # The default value is stored in etcd, however it is only initialised
         # during node instantiation.  Therefore, if the value is not present
@@ -964,6 +964,6 @@ class DatastoreClient(object):
         try:
             as_num = self.etcd_client.read(BGP_NODE_DEF_AS_PATH).value
         except EtcdKeyNotFound:
-            return DEFAULT_AS_NUM
+            return str(DEFAULT_AS_NUM)
         else:
-            return as_num
+            return str(as_num)
