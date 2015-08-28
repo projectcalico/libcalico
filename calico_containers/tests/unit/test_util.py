@@ -154,7 +154,7 @@ class TestUtil(unittest.TestCase):
                                   'fe80::188f:d6ff:fe1f:1482'])
 
     @patch("pycalico.util.check_output", autospec=True)
-    def test_get_host_ips_exclude_docker(self, m_check_output):
+    def test_get_host_ips_exclude_docker_prefix(self, m_check_output):
         '''Test get_host_ips exclude "docker0.*'''
         # Test IPv4
         m_check_output.return_value = MOCK_IP_ADDR_DOCKER_NONE
