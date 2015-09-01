@@ -1,6 +1,6 @@
 import sys
 import re
-from netaddr import IPNetwork
+from netaddr import IPNetwork, AddrFormatError
 from subprocess import check_output, CalledProcessError
 
 """

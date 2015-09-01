@@ -13,8 +13,17 @@
 # limitations under the License.
 
 # The various Exceptions that can be raised by datastore.py are collected here
+from pycalico import PyCalicoError
 
-class NoEndpointForContainer(Exception):
+
+class DataStoreError(PyCalicoError):
+    """
+    General Datastore exception.
+    """
+    pass
+
+
+class NoEndpointForContainer(DataStoreError):
     """
     Tried to get the endpoint associated with a container that has no
     endpoints.
@@ -22,14 +31,7 @@ class NoEndpointForContainer(Exception):
     pass
 
 
-class DataStoreError(Exception):
-    """
-    General Datastore exception.
-    """
-    pass
-
-
-class ProfileNotInEndpoint(Exception):
+class ProfileNotInEndpoint(DataStoreError):
     """
     Attempting to remove a profile that is not in the container endpoint
     profile list.
@@ -38,7 +40,7 @@ class ProfileNotInEndpoint(Exception):
         self.profile_name = profile_name
 
 
-class ProfileAlreadyInEndpoint(Exception):
+class ProfileAlreadyInEndpoint(DataStoreError):
     """
     Attempting to append a profile that is already in the container endpoint
     profile list.
@@ -47,13 +49,14 @@ class ProfileAlreadyInEndpoint(Exception):
         self.profile_name = profile_name
 
 
-class MultipleEndpointsMatch(Exception):
+class MultipleEndpointsMatch(DataStoreError):
     """
     More than one endpoint was found for the specified criteria.
     """
     pass
 
-class PoolNotFound(Exception):
+
+class PoolNotFound(DataStoreError):
     """
     IPPool cannot be found or it has not been configured correctly
     """
