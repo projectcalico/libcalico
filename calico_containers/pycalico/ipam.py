@@ -33,7 +33,7 @@ from pycalico.handle import (AllocationHandle,
 
 _log = logging.getLogger(__name__)
 
-IPAM_V_PATH = "/calico/ipam/v1/"
+IPAM_V_PATH = "/calico/ipam/v2/"
 IPAM_HOST_PATH = IPAM_V_PATH + "host/%(hostname)s/"
 IPAM_HOST_AFFINITY_PATH = IPAM_HOST_PATH + "ipv%(version)d/block/"
 IPAM_BLOCK_PATH = IPAM_V_PATH + "assignment/ipv%(version)d/block/"

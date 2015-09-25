@@ -25,8 +25,10 @@ from pycalico.block import (AllocationBlock,
                             get_block_cidr_for_address)
 from etcd import EtcdResult
 
-network = IPNetwork("192.168.25.0/24")
+network = IPNetwork("192.168.25.0/26")
 
+BLOCK_V4_1 = IPNetwork("10.11.12.0/26")
+BLOCK_V6_1 = IPNetwork("2001:abcd:def0::/122")
 
 class TestAllocationBlock(unittest.TestCase):
     def test_init_block_id(self):
@@ -169,7 +171,7 @@ class TestAllocationBlock(unittest.TestCase):
 
         attr = {"key21": "value1", "key22": "value2"}
         ips = block0.auto_assign(1, "key2", attr)
-        assert_list_equal([IPAddress("10.11.12.0")], ips)
+        assert_list_equal([BLOCK_V4_1[0]], ips)
         assert_equal(block0.attributes[0][AllocationBlock.ATTR_HANDLE_ID],
                      "key2")
         assert_dict_equal(block0.attributes[0][AllocationBlock.ATTR_SECONDARY],
@@ -178,9 +180,9 @@ class TestAllocationBlock(unittest.TestCase):
 
         # Allocate again from the first block, with a different key.
         ips = block0.auto_assign(3, "key3", attr)
-        assert_list_equal([IPAddress("10.11.12.1"),
-                           IPAddress("10.11.12.2"),
-                           IPAddress("10.11.12.3")], ips)
+        assert_list_equal([BLOCK_V4_1[1],
+                           BLOCK_V4_1[2],
+                           BLOCK_V4_1[3]], ips)
         assert_equal(block0.attributes[1][AllocationBlock.ATTR_HANDLE_ID],
                      "key3")
         assert_dict_equal(block0.attributes[1][AllocationBlock.ATTR_SECONDARY],
@@ -189,9 +191,9 @@ class TestAllocationBlock(unittest.TestCase):
 
         # Allocate with different attributes.
         ips = block0.auto_assign(3, "key3", {})
-        assert_list_equal([IPAddress("10.11.12.4"),
-                           IPAddress("10.11.12.5"),
-                           IPAddress("10.11.12.6")], ips)
+        assert_list_equal([BLOCK_V4_1[4],
+                           BLOCK_V4_1[5],
+                           BLOCK_V4_1[6]], ips)
         assert_equal(block0.attributes[2][AllocationBlock.ATTR_HANDLE_ID],
                      "key3")
         assert_dict_equal(block0.attributes[2][AllocationBlock.ATTR_SECONDARY],
@@ -201,16 +203,16 @@ class TestAllocationBlock(unittest.TestCase):
         # Allocate 3 from a new block.
         block1 = _test_block_empty_v4()
         ips = block1.auto_assign(3, "key2", attr)
-        assert_list_equal([IPAddress("10.11.12.0"),
-                           IPAddress("10.11.12.1"),
-                           IPAddress("10.11.12.2")], ips)
+        assert_list_equal([BLOCK_V4_1[0],
+                           BLOCK_V4_1[1],
+                           BLOCK_V4_1[2]], ips)
         assert_equal(block1.count_free_addresses(), BLOCK_SIZE - 3)
 
         # Allocate again with same keys.
         ips = block1.auto_assign(3, "key2", attr)
-        assert_list_equal([IPAddress("10.11.12.3"),
-                           IPAddress("10.11.12.4"),
-                           IPAddress("10.11.12.5")], ips)
+        assert_list_equal([BLOCK_V4_1[3],
+                           BLOCK_V4_1[4],
+                           BLOCK_V4_1[5]], ips)
         assert_equal(block1.count_free_addresses(), BLOCK_SIZE - 6)
         # Assert we didn't create another attribute entry.
         assert_equal(len(block1.attributes), 1)
@@ -221,15 +223,15 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(len(block1.attributes), 1)
         assert_equal(block1.count_free_addresses(), BLOCK_SIZE - 6)
 
-        # Allocate another 248 addresses, so the block is nearly full
-        ips = block1.auto_assign(248, None, {})
-        assert_equal(len(ips), 248)
+        # Allocate addresses, so the block is nearly full
+        ips = block1.auto_assign(BLOCK_SIZE - 8, None, {})
+        assert_equal(len(ips), BLOCK_SIZE - 8)
         assert_equal(block1.count_free_addresses(), 2)
 
-        # Allocate 4 addresses.  248+3+3 = 254, so only 2 addresses left.
+        # Allocate 4 addresses.  Only 2 addresses left.
         ips = block1.auto_assign(4, None, {})
-        assert_list_equal([IPAddress("10.11.12.254"),
-                           IPAddress("10.11.12.255")], ips)
+        assert_list_equal([BLOCK_V4_1[-2],
+                           BLOCK_V4_1[-1]], ips)
         assert_equal(block1.count_free_addresses(), 0)
 
         # Block is now full, further attempts return no addresses
@@ -240,10 +242,10 @@ class TestAllocationBlock(unittest.TestCase):
         # sequential.
         block2 = _test_block_not_empty_v4()
         ips = block2.auto_assign(4, None, {})
-        assert_list_equal([IPAddress("10.11.12.0"),
-                           IPAddress("10.11.12.1"),
-                           IPAddress("10.11.12.3"),
-                           IPAddress("10.11.12.5")], ips)
+        assert_list_equal([BLOCK_V4_1[0],
+                           BLOCK_V4_1[1],
+                           BLOCK_V4_1[3],
+                           BLOCK_V4_1[5]], ips)
         assert_equal(block2.count_free_addresses(), BLOCK_SIZE - 6)
 
 
@@ -253,7 +255,7 @@ class TestAllocationBlock(unittest.TestCase):
 
         attr = {"key21": "value1", "key22": "value2"}
         ips = block0.auto_assign(1, "key2", attr)
-        assert_list_equal([IPAddress("2001:abcd:def0::")], ips)
+        assert_list_equal([BLOCK_V6_1[0]], ips)
         assert_equal(block0.attributes[0][AllocationBlock.ATTR_HANDLE_ID],
                      "key2")
         assert_dict_equal(block0.attributes[0][AllocationBlock.ATTR_SECONDARY],
@@ -262,9 +264,9 @@ class TestAllocationBlock(unittest.TestCase):
 
         # Allocate again from the first block, with a different key.
         ips = block0.auto_assign(3, "key3", attr)
-        assert_list_equal([IPAddress("2001:abcd:def0::1"),
-                           IPAddress("2001:abcd:def0::2"),
-                           IPAddress("2001:abcd:def0::3")], ips)
+        assert_list_equal([BLOCK_V6_1[1],
+                           BLOCK_V6_1[2],
+                           BLOCK_V6_1[3]], ips)
         assert_equal(block0.attributes[1][AllocationBlock.ATTR_HANDLE_ID],
                      "key3")
         assert_dict_equal(block0.attributes[1][AllocationBlock.ATTR_SECONDARY],
@@ -273,9 +275,9 @@ class TestAllocationBlock(unittest.TestCase):
 
         # Allocate with different attributes.
         ips = block0.auto_assign(3, "key3", {})
-        assert_list_equal([IPAddress("2001:abcd:def0::4"),
-                           IPAddress("2001:abcd:def0::5"),
-                           IPAddress("2001:abcd:def0::6")], ips)
+        assert_list_equal([BLOCK_V6_1[4],
+                           BLOCK_V6_1[5],
+                           BLOCK_V6_1[6]], ips)
         assert_equal(block0.attributes[2][AllocationBlock.ATTR_HANDLE_ID],
                      "key3")
         assert_dict_equal(block0.attributes[2][AllocationBlock.ATTR_SECONDARY],
@@ -285,16 +287,16 @@ class TestAllocationBlock(unittest.TestCase):
         # Allocate 3 from a new block.
         block1 = _test_block_empty_v6()
         ips = block1.auto_assign(3, "key2", attr)
-        assert_list_equal([IPAddress("2001:abcd:def0::"),
-                           IPAddress("2001:abcd:def0::1"),
-                           IPAddress("2001:abcd:def0::2")], ips)
+        assert_list_equal([BLOCK_V6_1[0],
+                           BLOCK_V6_1[1],
+                           BLOCK_V6_1[2]], ips)
         assert_equal(block1.count_free_addresses(), BLOCK_SIZE - 3)
 
         # Allocate again with same keys.
         ips = block1.auto_assign(3, "key2", attr)
-        assert_list_equal([IPAddress("2001:abcd:def0::3"),
-                           IPAddress("2001:abcd:def0::4"),
-                           IPAddress("2001:abcd:def0::5")], ips)
+        assert_list_equal([BLOCK_V6_1[3],
+                           BLOCK_V6_1[4],
+                           BLOCK_V6_1[5]], ips)
         assert_equal(block1.count_free_addresses(), BLOCK_SIZE - 6)
         # Assert we didn't create another attribute entry.
         assert_equal(len(block1.attributes), 1)
@@ -305,15 +307,15 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(len(block1.attributes), 1)
         assert_equal(block1.count_free_addresses(), BLOCK_SIZE - 6)
 
-        # Allocate another 248 addresses, so the block is nearly full
-        ips = block1.auto_assign(248, None, {})
-        assert_equal(len(ips), 248)
+        # Allocate addresses, so the block is nearly full
+        ips = block1.auto_assign(BLOCK_SIZE - 8, None, {})
+        assert_equal(len(ips), BLOCK_SIZE - 8)
         assert_equal(block1.count_free_addresses(), 2)
 
         # Allocate 4 addresses.  248+3+3 = 254, so only 2 addresses left
         ips = block1.auto_assign(4, None, {})
-        assert_list_equal([IPAddress("2001:abcd:def0::fe"),
-                           IPAddress("2001:abcd:def0::ff")], ips)
+        assert_list_equal([BLOCK_V6_1[-2],
+                           BLOCK_V6_1[-1]], ips)
         assert_equal(block1.count_free_addresses(), 0)
 
         # Block is now full, further attempts return no addresses
@@ -325,19 +327,20 @@ class TestAllocationBlock(unittest.TestCase):
         block2 = _test_block_not_empty_v6()
         assert_equal(block2.count_free_addresses(), BLOCK_SIZE - 2)
         ips = block2.auto_assign(4, None, {})
-        assert_list_equal([IPAddress("2001:abcd:def0::"),
-                           IPAddress("2001:abcd:def0::1"),
-                           IPAddress("2001:abcd:def0::3"),
-                           IPAddress("2001:abcd:def0::5")], ips)
+        assert_list_equal([BLOCK_V6_1[0],
+                           BLOCK_V6_1[1],
+                           BLOCK_V6_1[3],
+                           BLOCK_V6_1[5]], ips)
         assert_equal(block2.count_free_addresses(), BLOCK_SIZE - 6)
 
         # Test ordinal math still works for small IPv6 addresses
-        block3 = AllocationBlock(IPNetwork("::1234:5600/120"), "test_host1")
+        sm_cidr = IPNetwork("::1234:5600/122")
+        block3 = AllocationBlock(sm_cidr, "test_host1")
         ips = block3.auto_assign(4, None, {})
-        assert_list_equal([IPAddress("::1234:5600"),
-                           IPAddress("::1234:5601"),
-                           IPAddress("::1234:5602"),
-                           IPAddress("::1234:5603")], ips)
+        assert_list_equal([sm_cidr[0],
+                           sm_cidr[1],
+                           sm_cidr[2],
+                           sm_cidr[3]], ips)
         assert_equal(block3.count_free_addresses(), BLOCK_SIZE - 4)
 
     @patch("pycalico.block.my_hostname", "not_the_right_host")
@@ -347,12 +350,12 @@ class TestAllocationBlock(unittest.TestCase):
 
         # Disable the check.
         ips = block0.auto_assign(1, None, {}, affinity_check=False)
-        assert_list_equal([IPAddress("10.11.12.0")], ips)
+        assert_list_equal([BLOCK_V4_1[0]], ips)
 
     def test_assign_v4(self):
         block0 = _test_block_empty_v4()
 
-        ip0 = IPAddress("10.11.12.2")
+        ip0 = BLOCK_V4_1[2]
         attr = {"key21": "value1", "key22": "value2"}
         block0.assign(ip0, "key0", attr)
 
@@ -362,7 +365,7 @@ class TestAllocationBlock(unittest.TestCase):
     def test_assign_v6(self):
         block0 = _test_block_empty_v6()
 
-        ip0 = IPAddress("2001:abcd:def0::2")
+        ip0 = BLOCK_V6_1[2]
         attr = {"key21": "value1", "key22": "value2"}
         block0.assign(ip0, "key0", attr)
 
@@ -375,7 +378,7 @@ class TestAllocationBlock(unittest.TestCase):
         Mainline test of releasing addresses from a block
         """
         block0 = _test_block_not_empty_v4()
-        ip = IPAddress("10.11.12.13")
+        ip = BLOCK_V4_1[13]
         block0.assign(ip, None, {})
 
         (err, handles) = block0.release({ip})
@@ -413,7 +416,7 @@ class TestAllocationBlock(unittest.TestCase):
 
         # Check that release with already released IP returns the bad IP, but
         # releases the others.
-        bad_ips = {IPAddress("10.11.12.0")}
+        bad_ips = {BLOCK_V4_1[0]}
         (err, handles) = block0.release(set(ips3).union(bad_ips))
         assert_set_equal(err, bad_ips)
         assert_equal(block0.allocations[12], None)
@@ -512,13 +515,13 @@ class TestGetBlockCIDRForAddress(unittest.TestCase):
 
     @parameterized.expand([
         (IPAddress("192.168.3.7"),
-         IPNetwork("192.168.3.0/24")),
+         IPNetwork("192.168.3.0/26")),
         (IPAddress("10.34.11.75"),
-         IPNetwork("10.34.11.0/24")),
+         IPNetwork("10.34.11.64/26")),
         (IPAddress("2001:abee:beef::1234"),
-         IPNetwork("2001:abee:beef::1200/120")),
+         IPNetwork("2001:abee:beef::1200/122")),
         (IPAddress("2001:abee:beef::"),
-         IPNetwork("2001:abee:beef::/120")),
+         IPNetwork("2001:abee:beef::/122")),
     ])
     def test_get_block_cidr(self, address, cidr):
         """
@@ -529,7 +532,7 @@ class TestGetBlockCIDRForAddress(unittest.TestCase):
 
 
 def _test_block_empty_v4():
-    block = AllocationBlock(IPNetwork("10.11.12.0/24"), "test_host1")
+    block = AllocationBlock(BLOCK_V4_1, "test_host1")
     return block
 
 
@@ -546,7 +549,7 @@ def _test_block_not_empty_v4():
 
 
 def _test_block_empty_v6():
-    block = AllocationBlock(IPNetwork("2001:abcd:def0::/120"), "test_host1")
+    block = AllocationBlock(BLOCK_V6_1, "test_host1")
     return block
 
 
