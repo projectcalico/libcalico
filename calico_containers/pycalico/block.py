@@ -21,7 +21,7 @@ from pycalico import PyCalicoError
 _log = logging.getLogger(__name__)
 
 BITS_BY_VERSION = {4: 32, 6: 128}
-BLOCK_SIZE_BITS = 8
+BLOCK_SIZE_BITS = 6
 BLOCK_PREFIXLEN = {4: 32 - BLOCK_SIZE_BITS,
                    6: 128 - BLOCK_SIZE_BITS}
 BLOCK_SIZE = 2 ** BLOCK_SIZE_BITS
