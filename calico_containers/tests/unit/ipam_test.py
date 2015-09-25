@@ -17,7 +17,7 @@ from nose.tools import *
 from mock import patch, ANY, call, Mock
 import unittest
 import json
-from etcd import EtcdResult, Client, EtcdAlreadyExist, EtcdKeyNotFound
+from etcd import EtcdResult, Client, EtcdAlreadyExist, EtcdKeyNotFound, EtcdCompareFailed
 
 from pycalico.ipam import (IPAMClient, BlockHandleReaderWriter,
                            CASError, NoFreeBlocksError, _block_datastore_key,
@@ -210,7 +210,7 @@ class TestIPAMClient(unittest.TestCase):
 
         # Read three times, update 3 times.
         self.m_etcd_client.read.side_effect = [m_result0, m_result1, m_result2]
-        self.m_etcd_client.update.side_effect = [ValueError(),
+        self.m_etcd_client.update.side_effect = [EtcdCompareFailed(),
                                                  None,
                                                  None]
 
@@ -260,11 +260,11 @@ class TestIPAMClient(unittest.TestCase):
         # update the handle will be incremented and decremented, for the
         # successful block update, the handle will be incremented.
         side_effs = {m_resultb.key:  # Block updates
-                       [ValueError(),  # 1. Fail
-                        ValueError(),  # 2. Fail
+                       [EtcdCompareFailed(),  # 1. Fail
+                        EtcdCompareFailed(),  # 2. Fail
                         None],  # 3. Success
                      m_resulth.key:  # Handle updates
-                       [ValueError(), None, None,  # 1. Inc Fail, Inc, Dec
+                       [EtcdCompareFailed(), None, None,  # 1. Inc Fail, Inc, Dec
                         None, None,  # 2. Inc, Dec
                         None]}  # 3. Inc.
         def update(result):
@@ -306,7 +306,7 @@ class TestIPAMClient(unittest.TestCase):
             """ Return a copy of the current stored value depending on key."""
             return copy.copy(m_resultb)
         self.m_etcd_client.read.side_effect = read
-        self.m_etcd_client.update.side_effect = ValueError()
+        self.m_etcd_client.update.side_effect = EtcdCompareFailed()
 
         with patch("pycalico.ipam.BlockHandleReaderWriter._get_affine_blocks",
                    m_get_affine_blocks):
@@ -426,7 +426,7 @@ class TestIPAMClient(unittest.TestCase):
         self.m_etcd_client.read.side_effect = [m_result0, m_result1]
 
         # First update fails, then succeeds.
-        self.m_etcd_client.update.side_effect = [ValueError(),
+        self.m_etcd_client.update.side_effect = [EtcdCompareFailed(),
                                                  None]
 
         ip0 = IPAddress("10.11.12.55")
@@ -472,11 +472,11 @@ class TestIPAMClient(unittest.TestCase):
         # update the handle will be incremented and decremented, for the
         # successful block update, the handle will be incremented.
         side_effs = {m_resultb.key:                     # Block updates
-                       [ValueError(),                   # 1. Fail
-                        ValueError(),                   # 2. Fail
+                       [EtcdCompareFailed(),                   # 1. Fail
+                        EtcdCompareFailed(),                   # 2. Fail
                         None],                          # 3. Success
                      m_resulth.key:                     # Handle updates
-                       [ValueError(), None, None,       # 1. Inc Fail, Inc, Dec
+                       [EtcdCompareFailed(), None, None,       # 1. Inc Fail, Inc, Dec
                         None, None,                     # 2. Inc, Dec
                         None]}                          # 3. Inc.
         def update(result):
@@ -515,7 +515,7 @@ class TestIPAMClient(unittest.TestCase):
         self.m_etcd_client.read.side_effect = read
 
         # First update fails, then succeeds.
-        self.m_etcd_client.update.side_effect = ValueError()
+        self.m_etcd_client.update.side_effect = EtcdCompareFailed()
 
         ip0 = IPAddress("10.11.12.55")
         self.assertRaises(RuntimeError, self.client.assign_ip, ip0, None, {})
@@ -944,7 +944,7 @@ class TestIPAMClient(unittest.TestCase):
         # Mock out update, so we can fail the first one.  We should then get
         # a successful update for the block, an update for the handle, an
         # update for the next block.  The handle is then deleted.
-        update_errors = [ValueError(), None, None, None]
+        update_errors = [EtcdCompareFailed(), None, None, None]
 
         def update(result):
             error = update_errors.pop(0)
@@ -1669,7 +1669,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         handle0.db_result.value = handle0.to_json()
         handle0.db_result.modifiedIndex = 55555
         handle0.increment_block(block_cidr, amount)
-        self.m_etcd_client.update.side_effect = ValueError()
+        self.m_etcd_client.update.side_effect = EtcdCompareFailed()
 
         self.assertRaises(CASError, self.client._compare_and_swap_handle,
                           handle0)
