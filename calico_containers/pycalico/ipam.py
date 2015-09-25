@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from etcd import EtcdKeyNotFound, EtcdAlreadyExist
+from etcd import EtcdKeyNotFound, EtcdAlreadyExist, EtcdCompareFailed
 
 from netaddr import IPAddress, IPNetwork
 import socket
@@ -76,7 +76,7 @@ class BlockHandleReaderWriter(DatastoreClient):
             _log.debug("CAS Update block %s", block)
             try:
                 self.etcd_client.update(block.update_result())
-            except ValueError:
+            except EtcdCompareFailed:
                 raise CASError(str(block.cidr))
         else:
             _log.debug("CAS Write new block %s", block)
@@ -322,7 +322,7 @@ class BlockHandleReaderWriter(DatastoreClient):
                 _log.debug("Handle %s is not empty.", handle.handle_id)
                 try:
                     self.etcd_client.update(handle.update_result())
-                except ValueError:
+                except EtcdCompareFailed:
                     raise CASError(handle.handle_id)
         else:
             _log.debug("CAS Write new handle %s", handle.handle_id)
