@@ -981,6 +981,26 @@ class TestDatastoreClient(unittest.TestCase):
         self.assertEqual(data, {'cidr': '192.168.100.0/24'})
         self.assertEqual(pool, IPPool.from_json(raw_data))
 
+    def test_add_ip_pool_key_not_found(self):
+        """
+        Test adding an IP pool when the directory doesn't exists.
+        :return: None
+        """
+        # Return false for the IP in IP global setting.
+        self.etcd_client.read.side_effect = EtcdKeyNotFound
+
+        pool = IPPool("192.168.100.5/24", ipip=True, masquerade=True)
+        self.datastore.add_ip_pool(4, pool)
+        self.etcd_client.write.assert_has_calls(
+                             [call(CONFIG_PATH + "IpInIpEnabled", "true"),
+                              call(IPV4_POOLS_PATH + "192.168.100.0-24", ANY)])
+        raw_data = self.etcd_client.write.call_args[0][1]
+        data = json.loads(raw_data)
+        self.assertEqual(data, {'cidr': '192.168.100.0/24',
+                                "ipip": "tunl0",
+                                'masquerade': True})
+        self.assertEqual(pool, IPPool.from_json(raw_data))
+
     def test_del_ip_pool_exists(self):
         """
         Test remove_ip_pool() when the pool does exist.

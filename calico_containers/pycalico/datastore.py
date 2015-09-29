@@ -17,7 +17,7 @@ import os
 import socket
 import uuid
 import etcd
-from etcd import EtcdKeyNotFound, EtcdException, EtcdNotFile
+from etcd import EtcdKeyNotFound, EtcdException, EtcdNotFile, EtcdKeyError
 
 from netaddr import IPNetwork, IPAddress, AddrFormatError
 
@@ -357,8 +357,13 @@ class DatastoreClient(object):
         # If IP in IP is enabled on the pool, ensure that it is enabled
         # globally.
         if pool.ipip:
-            result = self.etcd_client.read(IP_IN_IP_PATH)
-            if result.value != IP_IN_IP_ENABLED:
+            # Attempt to read existing config and enable ipip if 
+            # etcd is empty or ipip is disabled.
+            try:
+                result = self.etcd_client.read(IP_IN_IP_PATH)
+            except EtcdKeyError:
+                result = None
+            if not result or result.value != IP_IN_IP_ENABLED:
                 self.etcd_client.write(IP_IN_IP_PATH, IP_IN_IP_ENABLED)
 
         # Now write the pool configuration.
