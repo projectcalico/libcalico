@@ -915,6 +915,26 @@ class DatastoreClient(object):
                            (workload_id, hostname))
 
     @handle_errors
+    def workload_exists(self, hostname, orchestrator_id, workload_id):
+        """
+        Check if a workload exists.
+        :param hostname: The name of the host the workload is on.
+        :param orchestrator_id: The orchestrator the workload belongs to.
+        :param workload_id: The workload ID.
+
+        :return: True if the profile exists, false otherwise.
+        """
+        workload_path = WORKLOAD_PATH % {"hostname": hostname,
+                                         "orchestrator_id": orchestrator_id,
+                                         "workload_id": workload_id}
+        try:
+            _ = self.etcd_client.read(workload_path)
+        except EtcdKeyNotFound:
+            return False
+        else:
+            return True
+
+    @handle_errors
     def set_bgp_node_mesh(self, enable):
         """
         Set whether the BGP node mesh is enabled or not.
