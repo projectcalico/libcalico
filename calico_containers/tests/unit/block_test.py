@@ -14,7 +14,7 @@
 from netaddr import IPNetwork, IPAddress
 from nose.tools import *
 from nose_parameterized import parameterized
-from mock import patch, ANY, call, Mock
+from mock import patch, Mock
 import unittest
 import json
 from pycalico.block import (AllocationBlock,
