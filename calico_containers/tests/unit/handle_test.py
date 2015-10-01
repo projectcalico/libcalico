@@ -11,10 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from netaddr import IPNetwork, IPAddress
+from netaddr import IPNetwork
 from nose.tools import *
-from nose_parameterized import parameterized
-from mock import patch, ANY, call, Mock
+from mock import Mock
 import unittest
 import json
 from pycalico.handle import (AllocationHandle, AddressCountTooLow)

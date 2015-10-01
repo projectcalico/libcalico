@@ -16,7 +16,7 @@ import os
 import unittest
 
 from nose.tools import *
-from mock import patch, Mock, call, ANY
+from mock import patch, call, ANY
 
 from pycalico.netns import (create_veth, remove_veth, veth_exists,
                             IP_CMD_TIMEOUT, CalledProcessError)

@@ -16,7 +16,6 @@ from etcd import EtcdKeyNotFound, EtcdAlreadyExist, EtcdCompareFailed
 
 from netaddr import IPAddress, IPNetwork
 import socket
-import uuid
 import logging
 import random
 
