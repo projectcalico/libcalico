@@ -14,9 +14,10 @@
 
 import json
 import os
+import socket
 import uuid
 import etcd
-from etcd import EtcdKeyNotFound, EtcdException
+from etcd import EtcdKeyNotFound, EtcdException, EtcdNotFile
 
 from netaddr import IPNetwork, IPAddress, AddrFormatError
 
@@ -87,6 +88,13 @@ DEFAULT_LOG_FILE_PATH = "none"
 IP_IN_IP_DISABLED = "false"
 IP_IN_IP_ENABLED = "true"
 
+# IPAM paths
+IPAM_V_PATH = "/calico/ipam/v2/"
+IPAM_HOST_PATH = IPAM_V_PATH + "host/%(hostname)s/"
+IPAM_HOST_AFFINITY_PATH = IPAM_HOST_PATH + "ipv%(version)d/block/"
+IPAM_BLOCK_PATH = IPAM_V_PATH + "assignment/ipv%(version)d/block/"
+IPAM_HANDLE_PATH = IPAM_V_PATH + "handle/"
+
 
 def handle_errors(fn):
     """
@@ -129,7 +137,15 @@ class DatastoreClient(object):
 
         # Configure IPAM directory structures (to ensure confd is able to
         # watch appropriate directory trees).
-        self.etcd_client.write(CONFIG_IF_PREF_PATH, IF_PREFIX)
+        host = socket.gethostname()
+        for version in (4, 6):
+            path = IPAM_HOST_AFFINITY_PATH % {"hostname": host,
+                                              "version": version}
+            try:
+                self.etcd_client.write(path, None, dir=True)
+            except EtcdNotFile:
+                # Directory already exists.
+                pass
 
         # Configure BGP global (default) config if it doesn't exist.
         self._write_global_config(BGP_NODE_DEF_AS_PATH, str(DEFAULT_AS_NUM))

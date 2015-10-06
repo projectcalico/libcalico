@@ -13,8 +13,9 @@
 # limitations under the License.
 
 from etcd import Client as EtcdClient
-from etcd import EtcdKeyNotFound, EtcdResult, EtcdException
+from etcd import EtcdKeyNotFound, EtcdResult, EtcdException, EtcdNotFile
 import json
+import socket
 import unittest
 from pycalico import netns
 
@@ -63,6 +64,9 @@ TEST_HOST_IPV4_PATH = TEST_HOST_PATH + "/bird_ip"
 TEST_BGP_HOST_IPV4_PATH = TEST_BGP_HOST_PATH + "/ip_addr_v4"
 TEST_BGP_HOST_IPV6_PATH = TEST_BGP_HOST_PATH + "/ip_addr_v6"
 TEST_BGP_HOST_AS_PATH = TEST_BGP_HOST_PATH + "/as_num"
+
+IPAM_V4_PATH = "/calico/ipam/v2/host/THIS_HOST/ipv4/block/"
+IPAM_V6_PATH = "/calico/ipam/v2/host/THIS_HOST/ipv6/block/"
 
 # 4 endpoints, with 2 TEST profile and 2 UNIT profile.
 EP_56 = Endpoint(TEST_HOST, "docker", TEST_CONT_ID, "567890abcdef",
@@ -455,10 +459,14 @@ class TestDatastoreClient(unittest.TestCase):
         self.datastore = DatastoreClient()
         m_etcd_client.assert_called_once_with(host="127.0.0.2", port=4002)
 
-    def test_ensure_global_config(self):
+    @patch('pycalico.ipam.socket.gethostname', autospec=True)
+    def test_ensure_global_config(self, m_gethostname):
         """
         Test ensure_global_config when it doesn't already exist.
         """
+        # Set up mocks
+        m_gethostname.return_value = "THIS_HOST"
+
         int_prefix_path = CONFIG_PATH + "InterfacePrefix"
         log_file_path = CONFIG_PATH + "LogSeverityFile"
         log_screen_path = CONFIG_PATH + "LogSeverityScreen"
@@ -480,7 +488,45 @@ class TestDatastoreClient(unittest.TestCase):
                           call(log_file_path_path),
                           call(ipip_path)]
         self.etcd_client.read.assert_has_calls(expected_reads)
+
         expected_writes = [call(int_prefix_path, "cali"),
+                           call(IPAM_V4_PATH, None, dir=True),
+                           call(IPAM_V6_PATH, None, dir=True),
+                           call(BGP_NODE_DEF_AS_PATH, "64511"),
+                           call(BGP_NODE_MESH_PATH, json.dumps({"enabled": True})),
+                           call(log_file_path, "none"),
+                           call(log_screen_path, "info"),
+                           call(log_file_path_path, "none"),
+                           call(ipip_path, "false"),
+                           call(CALICO_V_PATH + "/Ready", "true")]
+        self.etcd_client.write.assert_has_calls(expected_writes)
+
+    @patch('pycalico.ipam.socket.gethostname', autospec=True)
+    def test_ensure_global_config_exists_dir(self, m_gethostname):
+        """
+        Test ensure_global_config when directory exists.
+        """
+        # Set up mocks
+        m_gethostname.return_value = "THIS_HOST"
+
+        def explode(path, value, **kwargs):
+            if path == IPAM_V4_PATH:
+                raise EtcdNotFile()
+
+        self.etcd_client.write.side_effect = explode
+
+        int_prefix_path = CONFIG_PATH + "InterfacePrefix"
+        log_file_path = CONFIG_PATH + "LogSeverityFile"
+        log_screen_path = CONFIG_PATH + "LogSeverityScreen"
+        log_file_path_path = CONFIG_PATH + "LogFilePath"
+        ipip_path = CONFIG_PATH + "IpInIpEnabled"
+        self.etcd_client.read.side_effect = EtcdKeyNotFound
+
+        self.datastore.ensure_global_config()
+
+        expected_writes = [call(int_prefix_path, "cali"),
+                           call(IPAM_V4_PATH, None, dir=True),
+                           call(IPAM_V6_PATH, None, dir=True),
                            call(BGP_NODE_DEF_AS_PATH, "64511"),
                            call(BGP_NODE_MESH_PATH, json.dumps({"enabled": True})),
                            call(log_file_path, "none"),
@@ -523,7 +569,6 @@ class TestDatastoreClient(unittest.TestCase):
         Test getting a named profile that exists.
         Test getting a named profile that doesn't exist raises a KeyError.
         """
-
         def mock_read(path):
             result = Mock(spec=EtcdResult)
             if path == TEST_PROFILE_PATH:
@@ -1215,7 +1260,7 @@ class TestDatastoreClient(unittest.TestCase):
         """
 
         self.etcd_client.read.side_effect = \
-            get_mock_read_2_ep_for_cont(ALL_ENDPOINTS_PATH, True)  
+            get_mock_read_2_ep_for_cont(ALL_ENDPOINTS_PATH, True)
         eps = self.datastore.get_endpoints()
         assert_equal(len(eps), 2)
         assert_equal(eps[0].to_json(), EP_12.to_json())
@@ -1224,7 +1269,7 @@ class TestDatastoreClient(unittest.TestCase):
         assert_equal(eps[1].endpoint_id, EP_78.endpoint_id)
 
         self.etcd_client.read.side_effect = \
-            get_mock_read_2_ep_for_cont(TEST_ORCHESTRATORS_PATH, True)  
+            get_mock_read_2_ep_for_cont(TEST_ORCHESTRATORS_PATH, True)
         eps = self.datastore.get_endpoints(hostname=TEST_HOST)
         assert_equal(len(eps), 2)
         assert_equal(eps[0].to_json(), EP_12.to_json())
@@ -1243,7 +1288,7 @@ class TestDatastoreClient(unittest.TestCase):
         assert_equal(eps[1].endpoint_id, EP_78.endpoint_id)
 
         self.etcd_client.read.side_effect = \
-            get_mock_read_2_ep_for_cont(TEST_CONT_ENDPOINTS_PATH, True)  
+            get_mock_read_2_ep_for_cont(TEST_CONT_ENDPOINTS_PATH, True)
         eps = self.datastore.get_endpoints(hostname=TEST_HOST,
                                            orchestrator_id=TEST_ORCH_ID,
                                            workload_id=TEST_CONT_ID)
@@ -1776,7 +1821,7 @@ def get_mock_read_2_ep_for_cont(expected_path, expected_recursive):
         assert_equal(recursive, expected_recursive)
         assert_equal(path, expected_path)
         leaves = []
-    
+
         specs = [
             (CALICO_V_PATH + "/host/TEST_HOST/workload/docker/1234/endpoint/1234567890ab",
              EP_12.to_json()),
@@ -1788,7 +1833,7 @@ def get_mock_read_2_ep_for_cont(expected_path, expected_recursive):
             leaf.key = spec[0]
             leaf.value = spec[1]
             leaves.append(leaf)
-    
+
         result = Mock(spec=EtcdResult)
         result.leaves = iter(leaves)
         return result
