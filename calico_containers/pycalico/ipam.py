@@ -21,6 +21,9 @@ import random
 
 from pycalico.datastore_datatypes import IPPool
 from pycalico.datastore import DatastoreClient
+from pycalico.datastore import (IPAM_HOST_AFFINITY_PATH,
+                                IPAM_BLOCK_PATH,
+                                IPAM_HANDLE_PATH)
 from pycalico.datastore_errors import DataStoreError, PoolNotFound
 from pycalico.block import (AllocationBlock,
                             get_block_cidr_for_address,
@@ -32,15 +35,9 @@ from pycalico.handle import (AllocationHandle,
 
 _log = logging.getLogger(__name__)
 
-IPAM_V_PATH = "/calico/ipam/v2/"
-IPAM_HOST_PATH = IPAM_V_PATH + "host/%(hostname)s/"
-IPAM_HOST_AFFINITY_PATH = IPAM_HOST_PATH + "ipv%(version)d/block/"
-IPAM_BLOCK_PATH = IPAM_V_PATH + "assignment/ipv%(version)d/block/"
-IPAM_HANDLE_PATH = IPAM_V_PATH + "handle/"
 RETRIES = 100
 
 my_hostname = socket.gethostname()
-
 
 class BlockHandleReaderWriter(DatastoreClient):
     """
