@@ -9,4 +9,4 @@ sh==1.11
 coveralls
 netaddr==0.7.15
 subprocess32
-git+https://github.com/projectcalico/python-etcd.git@0.4.1+calico.1
+python-etcd>=0.4.2
