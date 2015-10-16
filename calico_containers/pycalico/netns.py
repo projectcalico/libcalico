@@ -13,7 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from subprocess32 import check_output, check_call, CalledProcessError
+from subprocess32 import check_output, check_call, CalledProcessError, STDOUT
 import socket
 import logging
 import logging.handlers
@@ -60,14 +60,15 @@ def create_veth(veth_name_host, veth_name_ns_temp):
     :return: None. Raises CalledProcessError on error.
     """
     # Create the veth
-    check_call(['ip', 'link',
+    _log.debug("Creating veth %s in temp_ns: %s", veth_name_host, veth_name_ns_temp)
+    check_output(['ip', 'link',
                 'add', veth_name_host,
                 'type', 'veth',
                 'peer', 'name', veth_name_ns_temp],
                timeout=IP_CMD_TIMEOUT)
 
     # Set the host end of the veth to 'up' so felix notices it.
-    check_call(['ip', 'link', 'set', veth_name_host, 'up'],
+    check_output(['ip', 'link', 'set', veth_name_host, 'up'],
                timeout=IP_CMD_TIMEOUT)
 
 
@@ -81,7 +82,7 @@ def remove_veth(veth_name_host):
     # The veth removal is best effort. If it fails then just log.
     if not veth_exists(veth_name_host):
         return False
-    check_call(['ip', 'link', 'del', veth_name_host],
+    check_output(['ip', 'link', 'del', veth_name_host],
                timeout=IP_CMD_TIMEOUT)
     return True
 
@@ -116,13 +117,14 @@ def move_veth_into_ns(namespace, veth_name_ns_temp, veth_name_ns):
     :return: None. Raises CalledProcessError on error.
     """
     with NamedNamespace(namespace) as ns:
+        _log.debug("Moving temp interface %s into ns %s.", veth_name_ns_temp, ns.name)
         # Create the veth pair and move one end into container:
-        check_call(["ip", "link", "set", veth_name_ns_temp,
+        check_output(["ip", "link", "set", veth_name_ns_temp,
                     "netns", ns.name],
                    timeout=IP_CMD_TIMEOUT)
-        ns.check_call(["ip", "link", "set", "dev", veth_name_ns_temp,
+        ns.check_output(["ip", "link", "set", "dev", veth_name_ns_temp,
                        "name", veth_name_ns])
-        ns.check_call(["ip", "link", "set", veth_name_ns, "up"])
+        ns.check_output(["ip", "link", "set", veth_name_ns, "up"])
 
 
 def set_veth_mac(veth_name_host, mac):
@@ -133,7 +135,7 @@ def set_veth_mac(veth_name_host, mac):
     :return: None. Raises CalledProcessError on error.
     """
     #TODO MAC should be an EUI object.
-    check_call(['ip', 'link', 'set',
+    check_output(['ip', 'link', 'set',
                 'dev', veth_name_host,
                 'address', mac],
                timeout=IP_CMD_TIMEOUT)
@@ -152,9 +154,9 @@ def add_ns_default_route(namespace, next_hop, veth_name_ns):
     assert isinstance(next_hop, IPAddress)
     with NamedNamespace(namespace) as ns:
         # Connected route to next hop & default route.
-        ns.check_call(["ip", "-%s" % next_hop.version, "route", "replace",
+        ns.check_output(["ip", "-%s" % next_hop.version, "route", "replace",
                        str(next_hop), "dev", veth_name_ns])
-        ns.check_call(["ip", "-%s" % next_hop.version, "route", "replace",
+        ns.check_output(["ip", "-%s" % next_hop.version, "route", "replace",
                       "default", "via", str(next_hop), "dev", veth_name_ns])
 
 
@@ -185,7 +187,7 @@ def add_ip_to_ns_veth(namespace, ip, veth_name_ns):
     :return: None. Raises CalledProcessError on error.
     """
     with NamedNamespace(namespace) as ns:
-        ns.check_call(["ip", "-%s" % ip.version, "addr", "add",
+        ns.check_output(["ip", "-%s" % ip.version, "addr", "add",
                        "%s/%s" % (ip, PREFIX_LEN[ip.version]),
                        "dev", veth_name_ns])
 
@@ -202,7 +204,7 @@ def remove_ip_from_ns_veth(namespace, ip, veth_name_ns):
     """
     assert isinstance(ip, IPAddress)
     with NamedNamespace(namespace) as ns:
-        ns.check_call(["ip", "-%s" % ip.version, "addr", "del",
+        ns.check_output(["ip", "-%s" % ip.version, "addr", "del",
                        "%s/%s" % (ip, PREFIX_LEN[ip.version]),
                        "dev", veth_name_ns])
 
@@ -253,17 +255,6 @@ class NamedNamespace(object):
             _log.exception("Failed to remove link: %s", self.nsn_dir)
         return False
 
-    def check_call(self, command):
-        """
-        Run a command within the named namespace.
-        :param command: The command to run.
-        :param shell: Whether this is a shell command.
-        :param timeout: Command timeout in seconds.
-        """
-        command = self._get_nets_command(command)
-        _log.debug("Run command: %s", command)
-        check_call(command, timeout=IP_CMD_TIMEOUT)
-
     def check_output(self, command):
         """
         Run a command within the named namespace.
@@ -273,7 +264,7 @@ class NamedNamespace(object):
         """
         command = self._get_nets_command(command)
         _log.debug("Run command: %s", command)
-        return check_output(command, timeout=IP_CMD_TIMEOUT)
+        return check_output(command, timeout=IP_CMD_TIMEOUT, stderr=STDOUT)
 
     def _get_nets_command(self, command):
         """
