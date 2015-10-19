@@ -28,7 +28,6 @@ BLOCK_SIZE = 2 ** BLOCK_SIZE_BITS
 PREFIX_MASK = {4: (IPAddress("255.255.255.255") ^ (BLOCK_SIZE - 1)),
                6: (IPAddress("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff") ^
                    (BLOCK_SIZE - 1))}
-my_hostname = socket.gethostname()
 
 
 class AllocationBlock(object):
@@ -145,7 +144,7 @@ class AllocationBlock(object):
         self.db_result.value = self.to_json()
         return self.db_result
 
-    def auto_assign(self, num, handle_id, attributes, affinity_check=True):
+    def auto_assign(self, num, handle_id, attributes, hostname, affinity_check=True):
         """
         Automatically pick and assign the given number of IP addresses.
 
@@ -156,6 +155,8 @@ class AllocationBlock(object):
         :param attributes: Contents of this dict will be stored with the
         assignment and can be queried using get_assignment_attributes().  Must
         be JSON serializable.
+        :param hostname: The hostname to use for affinity in
+        assigning IP addresses.
         :param affinity_check: If true, verify that this block's affinity is
         this host and throw a NoHostAffinityWarning if it isn't.  Set to false
         to disable this check.
@@ -164,7 +165,7 @@ class AllocationBlock(object):
         """
         assert num >= 0
 
-        if affinity_check and my_hostname != self.host_affinity:
+        if affinity_check and hostname != self.host_affinity:
             raise NoHostAffinityWarning("Host affinity is %s" %
                                         self.host_affinity)
 

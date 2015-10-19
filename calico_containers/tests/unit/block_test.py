@@ -165,12 +165,11 @@ class TestAllocationBlock(unittest.TestCase):
         json_dict[AllocationBlock.ALLOCATIONS][3] = 1
         assert_dict_equal(block_json_dict, json_dict)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
     def test_auto_assign_v4(self):
         block0 = _test_block_empty_v4()
 
         attr = {"key21": "value1", "key22": "value2"}
-        ips = block0.auto_assign(1, "key2", attr)
+        ips = block0.auto_assign(1, "key2", attr, "test_host1")
         assert_list_equal([BLOCK_V4_1[0]], ips)
         assert_equal(block0.attributes[0][AllocationBlock.ATTR_HANDLE_ID],
                      "key2")
@@ -179,7 +178,7 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(block0.count_free_addresses(), BLOCK_SIZE - 1)
 
         # Allocate again from the first block, with a different key.
-        ips = block0.auto_assign(3, "key3", attr)
+        ips = block0.auto_assign(3, "key3", attr, "test_host1")
         assert_list_equal([BLOCK_V4_1[1],
                            BLOCK_V4_1[2],
                            BLOCK_V4_1[3]], ips)
@@ -190,7 +189,7 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(block0.count_free_addresses(), BLOCK_SIZE - 4)
 
         # Allocate with different attributes.
-        ips = block0.auto_assign(3, "key3", {})
+        ips = block0.auto_assign(3, "key3", {}, "test_host1")
         assert_list_equal([BLOCK_V4_1[4],
                            BLOCK_V4_1[5],
                            BLOCK_V4_1[6]], ips)
@@ -202,14 +201,14 @@ class TestAllocationBlock(unittest.TestCase):
 
         # Allocate 3 from a new block.
         block1 = _test_block_empty_v4()
-        ips = block1.auto_assign(3, "key2", attr)
+        ips = block1.auto_assign(3, "key2", attr, "test_host1")
         assert_list_equal([BLOCK_V4_1[0],
                            BLOCK_V4_1[1],
                            BLOCK_V4_1[2]], ips)
         assert_equal(block1.count_free_addresses(), BLOCK_SIZE - 3)
 
         # Allocate again with same keys.
-        ips = block1.auto_assign(3, "key2", attr)
+        ips = block1.auto_assign(3, "key2", attr, "test_host1")
         assert_list_equal([BLOCK_V4_1[3],
                            BLOCK_V4_1[4],
                            BLOCK_V4_1[5]], ips)
@@ -218,30 +217,30 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(len(block1.attributes), 1)
 
         # Test allocating 0 IPs with a new key.
-        ips = block1.auto_assign(0, "key3", attr)
+        ips = block1.auto_assign(0, "key3", attr, "test_host1")
         assert_list_equal(ips, [])
         assert_equal(len(block1.attributes), 1)
         assert_equal(block1.count_free_addresses(), BLOCK_SIZE - 6)
 
         # Allocate addresses, so the block is nearly full
-        ips = block1.auto_assign(BLOCK_SIZE - 8, None, {})
+        ips = block1.auto_assign(BLOCK_SIZE - 8, None, {}, "test_host1")
         assert_equal(len(ips), BLOCK_SIZE - 8)
         assert_equal(block1.count_free_addresses(), 2)
 
         # Allocate 4 addresses.  Only 2 addresses left.
-        ips = block1.auto_assign(4, None, {})
+        ips = block1.auto_assign(4, None, {}, "test_host1")
         assert_list_equal([BLOCK_V4_1[-2],
                            BLOCK_V4_1[-1]], ips)
         assert_equal(block1.count_free_addresses(), 0)
 
         # Block is now full, further attempts return no addresses
-        ips = block1.auto_assign(4, None, {})
+        ips = block1.auto_assign(4, None, {}, "test_host1")
         assert_list_equal([], ips)
 
         # Test that we can cope with already allocated addresses that aren't
         # sequential.
         block2 = _test_block_not_empty_v4()
-        ips = block2.auto_assign(4, None, {})
+        ips = block2.auto_assign(4, None, {}, "test_host1")
         assert_list_equal([BLOCK_V4_1[0],
                            BLOCK_V4_1[1],
                            BLOCK_V4_1[3],
@@ -249,12 +248,11 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(block2.count_free_addresses(), BLOCK_SIZE - 6)
 
 
-    @patch("pycalico.block.my_hostname", "test_host1")
     def test_auto_assign_v6(self):
         block0 = _test_block_empty_v6()
 
         attr = {"key21": "value1", "key22": "value2"}
-        ips = block0.auto_assign(1, "key2", attr)
+        ips = block0.auto_assign(1, "key2", attr, "test_host1")
         assert_list_equal([BLOCK_V6_1[0]], ips)
         assert_equal(block0.attributes[0][AllocationBlock.ATTR_HANDLE_ID],
                      "key2")
@@ -263,7 +261,7 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(block0.count_free_addresses(), BLOCK_SIZE - 1)
 
         # Allocate again from the first block, with a different key.
-        ips = block0.auto_assign(3, "key3", attr)
+        ips = block0.auto_assign(3, "key3", attr, "test_host1")
         assert_list_equal([BLOCK_V6_1[1],
                            BLOCK_V6_1[2],
                            BLOCK_V6_1[3]], ips)
@@ -274,7 +272,7 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(block0.count_free_addresses(), BLOCK_SIZE - 4)
 
         # Allocate with different attributes.
-        ips = block0.auto_assign(3, "key3", {})
+        ips = block0.auto_assign(3, "key3", {}, "test_host1")
         assert_list_equal([BLOCK_V6_1[4],
                            BLOCK_V6_1[5],
                            BLOCK_V6_1[6]], ips)
@@ -286,14 +284,14 @@ class TestAllocationBlock(unittest.TestCase):
 
         # Allocate 3 from a new block.
         block1 = _test_block_empty_v6()
-        ips = block1.auto_assign(3, "key2", attr)
+        ips = block1.auto_assign(3, "key2", attr, "test_host1")
         assert_list_equal([BLOCK_V6_1[0],
                            BLOCK_V6_1[1],
                            BLOCK_V6_1[2]], ips)
         assert_equal(block1.count_free_addresses(), BLOCK_SIZE - 3)
 
         # Allocate again with same keys.
-        ips = block1.auto_assign(3, "key2", attr)
+        ips = block1.auto_assign(3, "key2", attr, "test_host1")
         assert_list_equal([BLOCK_V6_1[3],
                            BLOCK_V6_1[4],
                            BLOCK_V6_1[5]], ips)
@@ -302,31 +300,31 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(len(block1.attributes), 1)
 
         # Test allocating 0 IPs with a new key.
-        ips = block1.auto_assign(0, "key3", attr)
+        ips = block1.auto_assign(0, "key3", attr, "test_host1")
         assert_list_equal(ips, [])
         assert_equal(len(block1.attributes), 1)
         assert_equal(block1.count_free_addresses(), BLOCK_SIZE - 6)
 
         # Allocate addresses, so the block is nearly full
-        ips = block1.auto_assign(BLOCK_SIZE - 8, None, {})
+        ips = block1.auto_assign(BLOCK_SIZE - 8, None, {}, "test_host1")
         assert_equal(len(ips), BLOCK_SIZE - 8)
         assert_equal(block1.count_free_addresses(), 2)
 
         # Allocate 4 addresses.  248+3+3 = 254, so only 2 addresses left
-        ips = block1.auto_assign(4, None, {})
+        ips = block1.auto_assign(4, None, {}, "test_host1")
         assert_list_equal([BLOCK_V6_1[-2],
                            BLOCK_V6_1[-1]], ips)
         assert_equal(block1.count_free_addresses(), 0)
 
         # Block is now full, further attempts return no addresses
-        ips = block1.auto_assign(4, None, {})
+        ips = block1.auto_assign(4, None, {}, "test_host1")
         assert_list_equal([], ips)
 
         # Test that we can cope with already allocated addresses that aren't
         # sequential.
         block2 = _test_block_not_empty_v6()
         assert_equal(block2.count_free_addresses(), BLOCK_SIZE - 2)
-        ips = block2.auto_assign(4, None, {})
+        ips = block2.auto_assign(4, None, {}, "test_host1")
         assert_list_equal([BLOCK_V6_1[0],
                            BLOCK_V6_1[1],
                            BLOCK_V6_1[3],
@@ -336,20 +334,20 @@ class TestAllocationBlock(unittest.TestCase):
         # Test ordinal math still works for small IPv6 addresses
         sm_cidr = IPNetwork("::1234:5600/122")
         block3 = AllocationBlock(sm_cidr, "test_host1")
-        ips = block3.auto_assign(4, None, {})
+        ips = block3.auto_assign(4, None, {}, "test_host1")
         assert_list_equal([sm_cidr[0],
                            sm_cidr[1],
                            sm_cidr[2],
                            sm_cidr[3]], ips)
         assert_equal(block3.count_free_addresses(), BLOCK_SIZE - 4)
 
-    @patch("pycalico.block.my_hostname", "not_the_right_host")
     def test_auto_assign_wrong_host(self):
         block0 = _test_block_empty_v4()
-        assert_raises(NoHostAffinityWarning, block0.auto_assign, 1, None, {})
+        assert_raises(NoHostAffinityWarning, block0.auto_assign, 1, None, {},
+                      "test_host2")
 
         # Disable the check.
-        ips = block0.auto_assign(1, None, {}, affinity_check=False)
+        ips = block0.auto_assign(1, None, {}, "test_host1", affinity_check=False)
         assert_list_equal([BLOCK_V4_1[0]], ips)
 
     def test_assign_v4(self):
@@ -372,7 +370,6 @@ class TestAllocationBlock(unittest.TestCase):
         # Try to assign the same address again.
         assert_raises(AlreadyAssignedError, block0.assign, ip0, "key0", attr)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
     def test_release_v4(self):
         """
         Mainline test of releasing addresses from a block
@@ -387,8 +384,10 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(len(block0.attributes), 1)
 
         # New assignments with different attrs, increases number of attrs to 2
-        ips0 = block0.auto_assign(5, "test_key", {"test": "value"})
-        ips1 = block0.auto_assign(5, "test_key", {"test": "value"})
+        ips0 = block0.auto_assign(5, "test_key", {"test": "value"},
+                                  "test_host1")
+        ips1 = block0.auto_assign(5, "test_key", {"test": "value"},
+                                  "test_host1")
         assert_equal(len(block0.attributes), 2)
 
         # Release half, still 2 unique attrs
@@ -397,12 +396,13 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(len(block0.attributes), 2)
 
         # Reassign 5, should be the same 5 just released.
-        ips2 = block0.auto_assign(5, "test_key", {"test": "value"})
+        ips2 = block0.auto_assign(5, "test_key", {"test": "value"},
+                                  "test_host1")
         assert_list_equal(ips2, ips0)
         assert_equal(len(block0.attributes), 2)
 
         # Assign additional addresses with new key, 3 attrs stored.
-        ips3 = block0.auto_assign(2, "test_key2", {})
+        ips3 = block0.auto_assign(2, "test_key2", {}, "test_host1")
         assert_equal(len(block0.attributes), 3)
         assert_equal(block0.allocations[11], 1)
         assert_equal(block0.allocations[12], 2)
@@ -422,7 +422,6 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(block0.allocations[12], None)
         assert_equal(block0.allocations[13], None)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
     def test_release_v6(self):
         """
         Mainline test of releasing addresses from a block
@@ -437,8 +436,10 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(len(block0.attributes), 1)
 
         # New assignments with different attrs, increases number of attrs to 2
-        ips0 = block0.auto_assign(5, "test_key", {"test": "value"})
-        ips1 = block0.auto_assign(5, "test_key", {"test": "value"})
+        ips0 = block0.auto_assign(5, "test_key", {"test": "value"},
+                                  "test_host1")
+        ips1 = block0.auto_assign(5, "test_key", {"test": "value"},
+                                  "test_host1")
         assert_equal(len(block0.attributes), 2)
 
         # Release half, still 2 unique attrs
@@ -447,12 +448,14 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(len(block0.attributes), 2)
 
         # Reassign 5, should be the same 5 just released.
-        ips2 = block0.auto_assign(5, "test_key", {"test": "value"})
+        ips2 = block0.auto_assign(5, "test_key", {"test": "value"},
+                                  "test_host1")
         assert_list_equal(ips2, ips0)
         assert_equal(len(block0.attributes), 2)
 
         # Assign additional addresses with new key, 3 attrs stored.
-        ips3 = block0.auto_assign(2, "test_key2", {})
+        ips3 = block0.auto_assign(2, "test_key2", {},
+                                  "test_host1")
         assert_equal(len(block0.attributes), 3)
         assert_equal(block0.allocations[11], 1)
         assert_equal(block0.allocations[12], 2)
