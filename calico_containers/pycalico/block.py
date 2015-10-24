@@ -19,6 +19,7 @@ import logging
 from pycalico import PyCalicoError
 
 _log = logging.getLogger(__name__)
+_log.addHandler(logging.NullHandler())
 
 BITS_BY_VERSION = {4: 32, 6: 128}
 BLOCK_SIZE_BITS = 6

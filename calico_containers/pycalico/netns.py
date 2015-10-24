@@ -13,18 +13,17 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from subprocess32 import check_output, check_call, CalledProcessError, STDOUT
 import socket
 import logging
-import logging.handlers
 import os
 import errno
-import sys
 import uuid
 
+from subprocess32 import check_output, check_call, CalledProcessError, STDOUT
 from netaddr import IPAddress
 
 _log = logging.getLogger(__name__)
+_log.addHandler(logging.NullHandler())
 
 HOSTNAME = socket.gethostname()
 

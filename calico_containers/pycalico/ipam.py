@@ -34,6 +34,7 @@ from pycalico.handle import (AllocationHandle,
                              AddressCountTooLow)
 
 _log = logging.getLogger(__name__)
+_log.addHandler(logging.NullHandler())
 
 RETRIES = 100
 
