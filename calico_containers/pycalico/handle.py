@@ -20,6 +20,7 @@ import logging
 from pycalico import PyCalicoError
 
 _log = logging.getLogger(__name__)
+_log.addHandler(logging.NullHandler())
 
 
 class AllocationHandle(object):
