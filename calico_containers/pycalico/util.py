@@ -1,7 +1,11 @@
+import socket
 import sys
+import os
 import re
 from netaddr import IPNetwork
 from subprocess import check_output, CalledProcessError
+
+HOSTNAME_ENV = "HOSTNAME"
 
 """
 Compile Regexes
@@ -71,3 +75,19 @@ def get_host_ips(version=4, exclude=None):
 
     return ip_addrs
 
+def get_hostname():
+    """
+    Gets the hostname. This will be the hostname returned by socket.gethostname,
+    but can be overridden by passing in the $HOSTNAME environment variable.
+    However, though most shells appear to have $HOSTNAME set, it is actually not
+    passed into subshells, so calicoctl will not see a set $HOSTNAME unless
+    the user has explicitly set it in their environment, thus defaulting
+    this function to return socket.gethostname.
+    :return: String representation of the hostname.
+    """
+    try:
+        return os.environ[HOSTNAME_ENV]
+    except KeyError:
+        # The user does not have a set $HOSTNAME. Since this is a common
+        # scenario, return socekt.gethostname instead of just erroring.
+        return socket.gethostname()

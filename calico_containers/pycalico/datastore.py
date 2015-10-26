@@ -14,7 +14,6 @@
 
 import json
 import os
-import socket
 import uuid
 import etcd
 from etcd import EtcdKeyNotFound, EtcdException, EtcdNotFile, EtcdKeyError
@@ -25,6 +24,7 @@ from pycalico.datastore_datatypes import Rules, BGPPeer, IPPool, \
     Endpoint, Profile, Rule, IF_PREFIX
 from pycalico.datastore_errors import DataStoreError, \
     ProfileNotInEndpoint, ProfileAlreadyInEndpoint, MultipleEndpointsMatch
+from pycalico.util import get_hostname
 
 ETCD_AUTHORITY_DEFAULT = "127.0.0.1:4001"
 ETCD_AUTHORITY_ENV = "ETCD_AUTHORITY"
@@ -137,7 +137,7 @@ class DatastoreClient(object):
 
         # Configure IPAM directory structures (to ensure confd is able to
         # watch appropriate directory trees).
-        host = socket.gethostname()
+        host = get_hostname()
         for version in (4, 6):
             path = IPAM_HOST_AFFINITY_PATH % {"hostname": host,
                                               "version": version}

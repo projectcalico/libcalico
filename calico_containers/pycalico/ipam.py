@@ -32,12 +32,12 @@ from pycalico.block import (AllocationBlock,
                             AddressNotAssignedError)
 from pycalico.handle import (AllocationHandle,
                              AddressCountTooLow)
+from pycalico.util import get_hostname
 
 _log = logging.getLogger(__name__)
 
 RETRIES = 100
 
-my_hostname = socket.gethostname()
 
 class BlockHandleReaderWriter(DatastoreClient):
     """
@@ -375,7 +375,7 @@ def _handle_datastore_key(handle_id):
 class IPAMClient(BlockHandleReaderWriter):
 
     def auto_assign_ips(self, num_v4, num_v6, handle_id, attributes,
-                        pool=(None, None), hostname=my_hostname):
+                        pool=(None, None), hostname=None):
         """
         Automatically pick and assign the given number of IPv4 and IPv6
         addresses.
@@ -391,13 +391,15 @@ class IPAMClient(BlockHandleReaderWriter):
         :param pool: (optional) tuple of (v4 pool, v6 pool); if supplied, the
         pool(s) to assign from,  If None, automatically choose a pool.
         :param hostname: (optional) the hostname to use for affinity in
-        assigning IP addresses.  Defaults to the local hostname as returned by
-        socket.gethostname().
+        assigning IP addresses.  Defaults to the hostname returned by get_hostname().
         :return: A tuple of (v4_address_list, v6_address_list).  When IPs in
         configured pools are at or near exhaustion, this method may return
         fewer than requested addresses.
         """
         assert isinstance(handle_id, str) or handle_id is None
+
+        if not hostname:
+            hostname = get_hostname()
 
         _log.info("Auto-assign %d IPv4, %d IPv6 addrs",
                   num_v4, num_v6)
@@ -555,7 +557,7 @@ class IPAMClient(BlockHandleReaderWriter):
                 return unconfirmed_ips
         raise RuntimeError("Hit Max Retries.")
 
-    def assign_ip(self, address, handle_id, attributes, hostname=my_hostname):
+    def assign_ip(self, address, handle_id, attributes, hostname=None):
         """
         Assign the given address.  Throws AlreadyAssignedError if the address
         is taken.
@@ -569,11 +571,13 @@ class IPAMClient(BlockHandleReaderWriter):
         be JSON serializable.
         :param hostname: (optional) the hostname to use for affinity if the
         block containing the IP address has no host affinity.  Defaults to the
-        local hostname as returned by socket.gethostname().
+        hostname returned by get_hostname().
         :return: None.
         """
         assert isinstance(handle_id, str) or handle_id is None
         assert isinstance(address, IPAddress)
+        if not hostname:
+            hostname = get_hostname()
         block_cidr = get_block_cidr_for_address(address)
 
         for _ in xrange(RETRIES):

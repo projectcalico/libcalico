@@ -165,8 +165,8 @@ class TestAllocationBlock(unittest.TestCase):
         json_dict[AllocationBlock.ALLOCATIONS][3] = 1
         assert_dict_equal(block_json_dict, json_dict)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_auto_assign_v4(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_auto_assign_v4(self, m_get_hostname):
         block0 = _test_block_empty_v4()
 
         attr = {"key21": "value1", "key22": "value2"}
@@ -249,8 +249,8 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(block2.count_free_addresses(), BLOCK_SIZE - 6)
 
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_auto_assign_v6(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_auto_assign_v6(self, m_get_hostname):
         block0 = _test_block_empty_v6()
 
         attr = {"key21": "value1", "key22": "value2"}
@@ -343,8 +343,8 @@ class TestAllocationBlock(unittest.TestCase):
                            sm_cidr[3]], ips)
         assert_equal(block3.count_free_addresses(), BLOCK_SIZE - 4)
 
-    @patch("pycalico.block.my_hostname", "not_the_right_host")
-    def test_auto_assign_wrong_host(self):
+    @patch("pycalico.block.get_hostname", return_value="not_the_right_host")
+    def test_auto_assign_wrong_host(self, m_get_hostname):
         block0 = _test_block_empty_v4()
         assert_raises(NoHostAffinityWarning, block0.auto_assign, 1, None, {})
 
@@ -372,8 +372,8 @@ class TestAllocationBlock(unittest.TestCase):
         # Try to assign the same address again.
         assert_raises(AlreadyAssignedError, block0.assign, ip0, "key0", attr)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_release_v4(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_release_v4(self, m_get_hostname):
         """
         Mainline test of releasing addresses from a block
         """
@@ -422,8 +422,8 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(block0.allocations[12], None)
         assert_equal(block0.allocations[13], None)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_release_v6(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_release_v6(self, m_get_hostname):
         """
         Mainline test of releasing addresses from a block
         """

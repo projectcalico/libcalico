@@ -13,10 +13,10 @@
 # limitations under the License.
 
 from netaddr import IPAddress, IPNetwork
-import socket
 import json
 import logging
 from pycalico import PyCalicoError
+from pycalico.util import get_hostname
 
 _log = logging.getLogger(__name__)
 
@@ -28,7 +28,6 @@ BLOCK_SIZE = 2 ** BLOCK_SIZE_BITS
 PREFIX_MASK = {4: (IPAddress("255.255.255.255") ^ (BLOCK_SIZE - 1)),
                6: (IPAddress("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff") ^
                    (BLOCK_SIZE - 1))}
-my_hostname = socket.gethostname()
 
 
 class AllocationBlock(object):
@@ -164,7 +163,7 @@ class AllocationBlock(object):
         """
         assert num >= 0
 
-        if affinity_check and my_hostname != self.host_affinity:
+        if affinity_check and get_hostname() != self.host_affinity:
             raise NoHostAffinityWarning("Host affinity is %s" %
                                         self.host_affinity)
 
