@@ -18,6 +18,8 @@ import logging
 import os
 import errno
 import uuid
+import re
+from copy import copy
 
 from subprocess32 import check_output, check_call, CalledProcessError, STDOUT
 from netaddr import IPAddress
@@ -33,6 +35,8 @@ PREFIX_LEN = {4: 32, 6: 128}
 IP_CMD_TIMEOUT = 5
 """How long to wait (seconds) for IP commands to complete."""
 
+MAX_METRIC = 0xFFFFFFFF
+"""Max valid value of a route's metric"""
 
 def setup_logging(logfile, level=logging.INFO):
     _log.setLevel(level)
@@ -48,6 +52,45 @@ def setup_logging(logfile, level=logging.INFO):
     handler.setLevel(level)
     handler.setFormatter(formatter)
     _log.addHandler(handler)
+
+
+def increment_metrics(namespace):
+    """
+    If any default route has a metric of 0, increase the metric of 
+    all default routes by 1, so long as it can be done without breaking
+    uniqueness or surpassing the max metric value.
+    :param namespace: The Networking namespace of the container.
+    :return: None. Raises CalledProcessError on error.
+    """
+    with NamedNamespace(namespace) as ns:
+        # Gather all default routes
+        routes = ns.check_output(["ip", "route"]).split("\n")
+        default_routes = {}
+        for route in routes:
+            route = Route(route)
+            if route.default:
+                default_routes[route.metric] = route
+
+        # Increment default routes (if a 0-metric default exists)
+        if 0 in default_routes:
+            # Order routes descending by metric so, while incrementing,
+            # no 2 routes temporarily have the same metric.
+            descending_routes = sorted(default_routes.items(),
+                                       key=lambda metric: -metric[0])
+            assigned_metrics = []
+            for metric, route in descending_routes:
+                if metric + 1 >= MAX_METRIC or metric + 1 in assigned_metrics:
+                    # Don't increment this metric
+                    assigned_metrics.append(metric)
+                else:
+                    # Increment this metric.
+                    original_route = copy(route)
+                    route.metric += 1
+
+                    ns.check_output(["ip", "route", "add"] + str(route).split())
+                    ns.check_output(["ip", "route", "del"] +
+                                    str(original_route).split())
+                    assigned_metrics.append(metric + 1)
 
 
 def create_veth(veth_name_host, veth_name_ns_temp):
@@ -206,6 +249,18 @@ def remove_ip_from_ns_veth(namespace, ip, veth_name_ns):
         ns.check_output(["ip", "-%s" % ip.version, "addr", "del",
                        "%s/%s" % (ip, PREFIX_LEN[ip.version]),
                        "dev", veth_name_ns])
+
+
+class Route(object):
+    def __init__(self, route_output):
+        self.route_output = route_output
+        self.default = route_output.startswith("default")
+        match = re.search('metric\s+(\d+)', route_output)
+        self.metric = int(match.group(1)) if match else 0
+
+    def __str__(self):
+        route_without_metric = re.sub('metric\s+\d+', '', self.route_output)
+        return "{} metric {}".format(route_without_metric, self.metric)
 
 
 class NamedNamespace(object):
