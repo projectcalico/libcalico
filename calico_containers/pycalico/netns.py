@@ -38,21 +38,6 @@ IP_CMD_TIMEOUT = 5
 MAX_METRIC = 0xFFFFFFFF
 """Max valid value of a route's metric"""
 
-def setup_logging(logfile, level=logging.INFO):
-    _log.setLevel(level)
-    formatter = logging.Formatter(
-        '%(asctime)s [%(levelname)s] %(name)s %(lineno)d: %(message)s')
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(level)
-    handler.setFormatter(formatter)
-    _log.addHandler(handler)
-    handler = logging.handlers.TimedRotatingFileHandler(logfile,
-                                                        when='D',
-                                                        backupCount=10)
-    handler.setLevel(level)
-    handler.setFormatter(formatter)
-    _log.addHandler(handler)
-
 
 def increment_metrics(namespace):
     """
