@@ -56,6 +56,7 @@ CONFIG_PATH = CALICO_V_PATH + "/config/"
 BGP_V_PATH = "/calico/bgp/v1"
 BGP_GLOBAL_PATH = BGP_V_PATH + "/global"
 TEST_BGP_HOST_PATH = BGP_V_PATH + "/host/TEST_HOST"
+TEST_IPAM_HOST_PATH = "/calico/ipam/v2/host/TEST_HOST"
 BGP_PEERS_PATH = BGP_GLOBAL_PATH + "/peer_v4/"
 TEST_NODE_BGP_PEERS_PATH = TEST_BGP_HOST_PATH + "/peer_v4/"
 BGP_NODE_DEF_AS_PATH = BGP_GLOBAL_PATH + "/as_num"
@@ -871,6 +872,9 @@ class TestDatastoreClient(unittest.TestCase):
         """
         self.datastore.remove_host(TEST_HOST)
         expected_deletes = [call(TEST_BGP_HOST_PATH + "/",
+                                 dir=True,
+                                 recursive=True),
+                            call(TEST_IPAM_HOST_PATH + "/",
                                  dir=True,
                                  recursive=True),
                             call(TEST_HOST_PATH + "/",

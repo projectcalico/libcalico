@@ -90,7 +90,8 @@ IP_IN_IP_ENABLED = "true"
 
 # IPAM paths
 IPAM_V_PATH = "/calico/ipam/v2/"
-IPAM_HOST_PATH = IPAM_V_PATH + "host/%(hostname)s/"
+IPAM_HOSTS_PATH = IPAM_V_PATH + "host/"
+IPAM_HOST_PATH = IPAM_HOSTS_PATH + "%(hostname)s/"
 IPAM_HOST_AFFINITY_PATH = IPAM_HOST_PATH + "ipv%(version)d/block/"
 IPAM_BLOCK_PATH = IPAM_V_PATH + "assignment/ipv%(version)d/block/"
 IPAM_HANDLE_PATH = IPAM_V_PATH + "handle/"
@@ -242,6 +243,13 @@ class DatastoreClient(object):
         bgp_host_path = BGP_HOST_PATH % {"hostname": hostname}
         try:
             self.etcd_client.delete(bgp_host_path, dir=True, recursive=True)
+        except EtcdKeyNotFound:
+            pass
+
+        # Remove the IPAM host tree.
+        ipam_host_path = IPAM_HOST_PATH % {"hostname": hostname}
+        try:
+            self.etcd_client.delete(ipam_host_path, dir=True, recursive=True)
         except EtcdKeyNotFound:
             pass
 
