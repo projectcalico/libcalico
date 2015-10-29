@@ -132,6 +132,22 @@ def veth_exists(veth_name_host):
             return False
 
 
+def ns_veth_exists(namespace, veth_name_ns):
+    """
+    Check if veth exists in the container Namespace.
+    :param veth_name_ns: The name of the veth interface.
+    :return: True if veth exists, False if veth does not exist
+    """
+    # No need to suppress output because command is running in the namespace.
+    with NamedNamespace(namespace) as ns:
+        try:
+            ns.check_output(["ip", "link", "show", veth_name_ns])
+            return True
+        except CalledProcessError:
+            # veth does not exist
+            return False
+
+
 def move_veth_into_ns(namespace, veth_name_ns_temp, veth_name_ns):
     """
     Move the veth into the namespace.
