@@ -18,9 +18,9 @@ import unittest
 from nose.tools import *
 from mock import patch, call, ANY, Mock
 
-from pycalico.netns import (create_veth, remove_veth, veth_exists, IP_CMD_TIMEOUT,
-                            CalledProcessError, Route, increment_metrics,
-                            Namespace)
+from pycalico.netns import (create_veth, remove_veth, veth_exists, ns_veth_exists,
+                            IP_CMD_TIMEOUT, CalledProcessError, Route,
+                            increment_metrics, Namespace, NamedNamespace)
 
 
 class TestVeth(unittest.TestCase):
@@ -77,7 +77,7 @@ class TestVeth(unittest.TestCase):
     @patch("pycalico.netns.check_call", autospec=True)
     def test_veth_exists_false(self, m_check_call, m_open):
         """
-        Test veth_exists returns True if no error occurs.
+        Test veth_exists returns False if an error occurs.
         """
         m_check_call.side_effect = CalledProcessError(1, "test")
         self.assertFalse(veth_exists("veth1"))
@@ -86,6 +86,28 @@ class TestVeth(unittest.TestCase):
                                              stderr=ANY,
                                              stdout=ANY)
 
+    @patch("pycalico.netns.NamedNamespace")
+    def test_ns_veth_exists_true(self, m_NamedNamespace):
+        """
+        Test ns_veth_exists returns True if no error occurs.
+        """
+        m_namespace = Mock(spec=NamedNamespace)
+        m_NamedNamespace().__enter__.return_value = m_namespace
+        self.assertTrue(ns_veth_exists(Mock(spec=Namespace), "veth1"))
+        m_namespace.check_output.assert_called_once_with(["ip", "link",
+                                                          "show", "veth1"])
+
+    @patch("pycalico.netns.NamedNamespace")
+    def test_ns_veth_exists_false(self, m_NamedNamespace):
+        """
+        Test ns_veth_exists returns False if an error occurs.
+        """
+        m_namespace = Mock(spec=NamedNamespace)
+        m_NamedNamespace().__enter__.return_value = m_namespace
+        m_namespace.check_output.side_effect = CalledProcessError(1, "test")
+        self.assertFalse(ns_veth_exists(Mock(spec=Namespace), "veth1"))
+        m_namespace.check_output.assert_called_once_with(["ip", "link",
+                                                          "show", "veth1"])
 
 class TestRoute(unittest.TestCase):
     def test_metric(self):
