@@ -15,7 +15,6 @@
 from etcd import Client as EtcdClient
 from etcd import EtcdKeyNotFound, EtcdResult, EtcdException, EtcdNotFile
 import json
-import socket
 import unittest
 from pycalico import netns
 
@@ -459,7 +458,7 @@ class TestDatastoreClient(unittest.TestCase):
         self.datastore = DatastoreClient()
         m_etcd_client.assert_called_once_with(host="127.0.0.2", port=4002)
 
-    @patch('pycalico.ipam.socket.gethostname', autospec=True)
+    @patch('pycalico.datastore.get_hostname', autospec=True)
     def test_ensure_global_config(self, m_gethostname):
         """
         Test ensure_global_config when it doesn't already exist.
@@ -501,7 +500,7 @@ class TestDatastoreClient(unittest.TestCase):
                            call(CALICO_V_PATH + "/Ready", "true")]
         self.etcd_client.write.assert_has_calls(expected_writes)
 
-    @patch('pycalico.ipam.socket.gethostname', autospec=True)
+    @patch('pycalico.datastore.get_hostname', autospec=True)
     def test_ensure_global_config_exists_dir(self, m_gethostname):
         """
         Test ensure_global_config when directory exists.

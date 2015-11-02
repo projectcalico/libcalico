@@ -27,8 +27,6 @@ from netaddr import IPAddress
 _log = logging.getLogger(__name__)
 _log.addHandler(logging.NullHandler())
 
-HOSTNAME = socket.gethostname()
-
 PREFIX_LEN = {4: 32, 6: 128}
 """The IP address prefix length to assign, by IP version."""
 

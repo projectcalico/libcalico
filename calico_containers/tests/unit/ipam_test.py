@@ -40,8 +40,8 @@ class TestIPAMClient(unittest.TestCase):
         self.m_etcd_client = Mock(spec=Client)
         self.client.etcd_client = self.m_etcd_client
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_auto_assign(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_auto_assign(self, m_get_hostname):
         """
         Mainline test of auto assign.
         """
@@ -60,8 +60,8 @@ class TestIPAMClient(unittest.TestCase):
             (ipv4s, ipv6s) = self.client.auto_assign_ips(1, 0, None, {})
             assert_list_equal([IPAddress("10.11.12.0")], ipv4s)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_auto_assign_dual(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_auto_assign_dual(self, m_get_hostname):
         """
         Test of auto assign with both IPv4 and IPv6 requests.
         """
@@ -90,8 +90,8 @@ class TestIPAMClient(unittest.TestCase):
             assert_list_equal([IPAddress("2001:abcd:def0::"),
                                IPAddress("2001:abcd:def0::1")], ipv6s)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_auto_assign_1st_block_full(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_auto_assign_1st_block_full(self, m_get_hostname):
         """
         Test auto assign when 1st block is full.
         """
@@ -115,8 +115,8 @@ class TestIPAMClient(unittest.TestCase):
             (ipv4s, ipv6s) = self.client.auto_assign_ips(1, 0, None, {})
             assert_list_equal([IPAddress("10.11.45.0")], ipv4s)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_auto_assign_span_blocks(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_auto_assign_span_blocks(self, m_get_hostname):
         """
         Test auto assign when 1st block has fewer than requested addresses.
         """
@@ -145,8 +145,8 @@ class TestIPAMClient(unittest.TestCase):
                                BLOCK_V4_2[0],
                                BLOCK_V4_2[1]], ipv4s)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_auto_assign_not_enough_addrs(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_auto_assign_not_enough_addrs(self, m_get_hostname):
         """
         Test auto assign when there aren't enough addresses, and no free
         blocks.
@@ -186,8 +186,8 @@ class TestIPAMClient(unittest.TestCase):
                                BLOCK_V4_1[-1],
                                BLOCK_V4_2[-1]], ipv4s)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_auto_assign_cas_fails(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_auto_assign_cas_fails(self, m_get_hostname):
         """
         Test auto assign when 1st block compare-and-swap fails.
         """
@@ -224,8 +224,8 @@ class TestIPAMClient(unittest.TestCase):
                                BLOCK_V4_2[1],
                                BLOCK_V4_2[2]], ipv4s)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_auto_assign_with_handle_cas_failure(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_auto_assign_with_handle_cas_failure(self, m_gethostname):
         """
         Test of auto assign with an existing handle, and transient CAS errors.
         """
@@ -288,8 +288,8 @@ class TestIPAMClient(unittest.TestCase):
         self.assertEqual(handle.handle_id, handle_id)
         self.assertEqual(handle.block, {"10.11.12.0/26": 2})
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_auto_assign_persistent_cas(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_auto_assign_persistent_cas(self, m_get_hostname):
         """
         Test of auto assign with persistent CAS errors.
         """
@@ -315,8 +315,8 @@ class TestIPAMClient(unittest.TestCase):
             self.assertRaises(RuntimeError, self.client.auto_assign_ips,
                               1, 0, None, {})
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_auto_assign_no_blocks(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_auto_assign_no_blocks(self, m_get_hostname):
         """
         Test auto assign when we haven't allocated blocks yet, but there are
         free blocks available.
@@ -353,8 +353,8 @@ class TestIPAMClient(unittest.TestCase):
                                IPAddress("192.168.0.2"),
                                IPAddress("192.168.0.3")], ipv4s)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_auto_assign_random_blocks(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_auto_assign_random_blocks(self, m_get_hostname):
         """
         Test auto assign when all blocks our blocks are full and all other
         blocks already have host affinity.
@@ -395,8 +395,8 @@ class TestIPAMClient(unittest.TestCase):
             for ip in ipv4s:
                 assert_true(ip in rando_block.cidr)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_assign(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_assign(self, m_get_hostname):
         """
         Mainline test of assign_ip().
         """
@@ -414,8 +414,8 @@ class TestIPAMClient(unittest.TestCase):
         json_dict = json.loads(m_result.value)
         assert_equal(json_dict[AllocationBlock.ALLOCATIONS][55], 0)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_assign_cas_fails(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_assign_cas_fails(self, m_get_hostname):
         """
         Test assign_ip() when the compare-and-swap fails.
         """
@@ -440,8 +440,8 @@ class TestIPAMClient(unittest.TestCase):
         json_dict = json.loads(m_result1.value)
         assert_equal(json_dict[AllocationBlock.ALLOCATIONS][55], 0)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_assign_with_handle_cas_fails(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_assign_with_handle_cas_fails(self, m_get_hostname):
         """
         Test assign_ip() using a handle when the compare-and-swap fails.
         """
@@ -504,8 +504,8 @@ class TestIPAMClient(unittest.TestCase):
         self.assertDictEqual(handle.block, {"10.11.12.0/26": 1,
                                             "10.11.13.0/26": 5})
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_assign_persistent_cas_fails(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_assign_persistent_cas_fails(self, m_get_hostname):
         """
         Test assign_ip() when the compare-and-swap fails persistently.
         """
@@ -523,8 +523,8 @@ class TestIPAMClient(unittest.TestCase):
         ip0 = IPAddress("10.11.12.55")
         self.assertRaises(RuntimeError, self.client.assign_ip, ip0, None, {})
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_assign_new_block(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_assign_new_block(self, m_get_hostname):
         """
         Test assign_ip() when address is in a block that hasn't been written.
         """
@@ -556,8 +556,8 @@ class TestIPAMClient(unittest.TestCase):
         assert_equal(json_dict[AllocationBlock.ALLOCATIONS][55], 0)
         assert_dict_equal({"prevExist": False}, kwargs)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_assign_new_block_cas_error(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_assign_new_block_cas_error(self, m_get_hostname):
         """
         Test assign_ip() when address is in a new block.
 
@@ -600,8 +600,8 @@ class TestIPAMClient(unittest.TestCase):
         json_dict = json.loads(m_result1.value)
         assert_equal(json_dict[AllocationBlock.ALLOCATIONS][55], 0)
 
-    @patch("pycalico.block.my_hostname", "test_host1")
-    def test_assign_not_in_pools(self):
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_assign_not_in_pools(self, m_get_hostname):
         """
         Test assign_ip() when address is not in configured pools.
         """
