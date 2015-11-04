@@ -31,6 +31,7 @@ from block_test import (_test_block_empty_v4, _test_block_empty_v6,
 
 network = IPNetwork("192.168.25.0/24")
 BLOCK_V4_2 = IPNetwork("10.11.45.0/26")
+BLOCK_V4_3 = IPNetwork("10.11.47.0/26")
 
 
 class TestIPAMClient(unittest.TestCase):
@@ -252,8 +253,9 @@ class TestIPAMClient(unittest.TestCase):
         # Read returns appropriate result based on key.
         read_results = {m_resultb.key: m_resultb,
                         m_resulth.key: m_resulth}
-        def read(key):
+        def read(key, quorum):
             """ Return a copy of the current stored value depending on key."""
+            assert quorum
             return copy.copy(read_results[key])
         self.m_etcd_client.read.side_effect = read
 
@@ -304,8 +306,9 @@ class TestIPAMClient(unittest.TestCase):
         m_resultb.value = block.to_json()
         m_resultb.key = "/calico/ipam/v2/assignment/ipv4/block/10.11.12.0-24"
 
-        def read(key):
+        def read(key, quorum):
             """ Return a copy of the current stored value depending on key."""
+            assert quorum
             return copy.copy(m_resultb)
         self.m_etcd_client.read.side_effect = read
         self.m_etcd_client.update.side_effect = EtcdCompareFailed()
@@ -396,6 +399,133 @@ class TestIPAMClient(unittest.TestCase):
                 assert_true(ip in rando_block.cidr)
 
     @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_auto_assign_bad_affinity(self, m_get_hostname):
+        """
+        Test auto assign when _get_affine_blocks returns some blocks that
+        don't exist or don't actually have host affinity.
+
+        This is a race condition that occurs because _get_affine_blocks only
+        checks the IPAM_HOST_AFFINITY_PATH to determine what blocks have
+        affinity to the host; it does not actually read the blocks themselves
+        to check affinity.
+
+        The race occurs because while attempting to allocate a new block with
+        affinity to this host, the IPAM client first writes to the
+        IPAM_HOST_AFFINITY_PATH before it writes to the block itself.  If
+        multiple IPAM clients are running on behalf of the host, the race can
+        go something like this:
+
+        1. Client A is allocating a new affine block, and writes the block_id
+           to IPAM_HOST_AFFINITY_PATH.
+        2. Client B needs to assign an address, so it reads the
+           IPAM_HOST_AFFINITY_PATH.
+        3. Client B attempts to read the block.  This fails, throwing a
+           KeyError.
+        4. Client A writes the new block.
+
+        If 4 happened before 3 we'd be fine.
+
+        Or consider a related scenario.
+
+        1. Client A is allocating a new affine block, and writes the block_id
+           to IPAM_HOST_AFFINITY_PATH.
+        2. Client B needs to assign an address, so it reads the
+           IPAM_HOST_AFFINITY_PATH.
+        3. A different host claims affinity for the block, and writes the new
+           block.
+        4. Client A attempts to write the block and fails, and cleans up the
+           IPAM_HOST_AFFINITY_PATH.
+        5. Client B attempts to read the block, but when it tries to auto
+           assign from the block, it fails because a different host has
+           affinity.  This throws a NoHostAffinityWarning.
+
+        """
+
+        affine_blocks = [BLOCK_V4_1,
+                         BLOCK_V4_2,
+                         BLOCK_V4_3]
+
+        def m_get_affine_blocks(self, host, ip_version, pool):
+            return affine_blocks
+
+        def m_read_block(self, block_cidr):
+            if block_cidr is BLOCK_V4_1:
+                # This block doesn't yet exist.
+                raise KeyError()
+            elif block_cidr is BLOCK_V4_2:
+                # This block exists, but we don't have host affinity to it.
+                block = AllocationBlock(BLOCK_V4_2, "test_host2")
+            elif block_cidr is BLOCK_V4_3:
+                # This block exists and we have host affinity.  Allocated IPs
+                # should come from this block.
+                block = AllocationBlock(BLOCK_V4_3, "test_host1")
+            else:
+                # Success on BLOCK_V4_3, so no additional blocks should be
+                # read.
+                assert_true(False)
+            return block
+
+        def m_get_ip_pools(self, version):
+            return [IPPool("10.11.0.0/18")]
+
+        with patch("pycalico.ipam.BlockHandleReaderWriter._get_affine_blocks",
+                   m_get_affine_blocks),\
+             patch("pycalico.datastore.DatastoreClient.get_ip_pools",
+                   m_get_ip_pools),\
+             patch("pycalico.ipam.BlockHandleReaderWriter._read_block",
+                   m_read_block):
+            (ipv4s, ipv6s) = self.client.auto_assign_ips(4, 0, None, {})
+            assert_equal(len(ipv4s), 4)
+            for ip in ipv4s:
+                assert_true(ip in BLOCK_V4_3)
+
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
+    def test_auto_assign_affinity_key_err_retries(self, m_get_hostname):
+        """
+        Test auto assign when _get_affine_blocks returns some blocks that
+        don't exist and we hit the maximum number of retries.
+        """
+
+        affine_blocks = [BLOCK_V4_1]
+
+        def m_get_affine_blocks(self, host, ip_version, pool):
+            return affine_blocks
+
+        # 4 attempts to read BLOCK_V4_1, then one attempt to read
+        # first_free_block
+        first_free_block = IPNetwork("10.11.0.0/26")
+        block = AllocationBlock(first_free_block, "test_host1")
+        m_read_block = Mock()
+        m_read_block.side_effect = [KeyError(),
+                                    KeyError(),
+                                    KeyError(),
+                                    KeyError(),
+                                    block]
+        # Note that _get_new_affine_block calls etcd_client.read() directly.
+        self.m_etcd_client.read.side_effect = EtcdKeyNotFound()
+
+        def m_get_ip_pools(self, version):
+            return [IPPool("10.11.0.0/18")]
+
+        with patch("pycalico.ipam.BlockHandleReaderWriter._get_affine_blocks",
+                   m_get_affine_blocks),\
+             patch("pycalico.datastore.DatastoreClient.get_ip_pools",
+                   m_get_ip_pools),\
+             patch("pycalico.ipam.BlockHandleReaderWriter._read_block",
+                   m_read_block):
+            (ipv4s, ipv6s) = self.client.auto_assign_ips(4, 0, None, {})
+            assert_equal(len(ipv4s), 4)
+            for ip in ipv4s:
+                assert_true(ip in first_free_block)
+            m_read_block.assert_has_calls([
+                call(BLOCK_V4_1),
+                call(BLOCK_V4_1),
+                call(BLOCK_V4_1),
+                call(BLOCK_V4_1),
+                call(first_free_block)
+            ])
+
+    @patch("pycalico.block.get_hostname", return_value="test_host1")
     def test_assign(self, m_get_hostname):
         """
         Mainline test of assign_ip().
@@ -464,8 +594,9 @@ class TestIPAMClient(unittest.TestCase):
         # Read returns appropriate result based on key.
         read_results = {m_resultb.key: m_resultb,
                         m_resulth.key: m_resulth}
-        def read(key):
+        def read(key, quorum):
             """ Return a copy of the current stored value depending on key."""
+            assert quorum
             return copy.copy(read_results[key])
         self.m_etcd_client.read.side_effect = read
 
@@ -513,7 +644,8 @@ class TestIPAMClient(unittest.TestCase):
         block = _test_block_empty_v4()
         m_result0 = Mock(spec=EtcdResult)
         m_result0.value = block.to_json()
-        def read(key):
+        def read(key, quorum):
+            assert quorum
             return copy.copy(m_result0)
         self.m_etcd_client.read.side_effect = read
 
@@ -941,7 +1073,8 @@ class TestIPAMClient(unittest.TestCase):
         read_results = {m_resulth.key: m_resulth,
                         m_resultb4.key: m_resultb4,
                         m_resultb6.key: m_resultb6}
-        def read(key):
+        def read(key, quorum):
+            assert quorum
             return copy.copy(read_results[key])
         self.m_etcd_client.read.side_effect = read
 
@@ -1022,7 +1155,8 @@ class TestIPAMClient(unittest.TestCase):
         # Mock out read.
         read_results = {m_resulth.key: m_resulth,
                         m_resultb4.key: m_resultb4}
-        def read(key):
+        def read(key, quorum):
+            assert quorum
             return read_results[key]
         self.m_etcd_client.read.side_effect = read
 
@@ -1172,7 +1306,8 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         expected_ids = ["192.168.3.0/26", "192.168.5.0/26"]
 
         # Return some blocks.
-        def m_read(path):
+        def m_read(path, quorum):
+            assert quorum
             assert path == "/calico/ipam/v2/host/test_host/ipv4/block/"
             result = Mock(spec=EtcdResult)
             children = []
@@ -1195,7 +1330,8 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         expected_ids = []
 
         # Return some blocks.
-        def m_read(path):
+        def m_read(path, quorum):
+            assert quorum
             assert path == "/calico/ipam/v2/host/test_host/ipv4/block/"
             result = Mock(spec=EtcdResult)
             result.children = iter([])
@@ -1224,7 +1360,8 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         returned_ids = ["192.168.3.0/26", "10.10.1.0/26"]
 
         # Return some blocks.
-        def m_read(path):
+        def m_read(path, quorum):
+            assert quorum
             assert path == "/calico/ipam/v2/host/test_host/ipv4/block/"
             result = Mock(spec=EtcdResult)
             children = []
@@ -1269,7 +1406,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         self.m_etcd_client.write.assert_has_calls([call(ANY, ""),
                                                    call(key, value,
                                                         prevExist=False)])
-        self.m_etcd_client.read.assert_called_once_with(key)
+        self.m_etcd_client.read.assert_called_once_with(key, quorum=True)
 
     def test_new_affine_block_race(self):
         """
