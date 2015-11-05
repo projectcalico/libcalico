@@ -29,7 +29,8 @@ from pycalico.block import (AllocationBlock,
                             get_block_cidr_for_address,
                             BLOCK_PREFIXLEN,
                             AlreadyAssignedError,
-                            AddressNotAssignedError)
+                            AddressNotAssignedError,
+                            NoHostAffinityWarning)
 from pycalico.handle import (AllocationHandle,
                              AddressCountTooLow)
 from pycalico.util import get_hostname
@@ -38,6 +39,8 @@ _log = logging.getLogger(__name__)
 _log.addHandler(logging.NullHandler())
 
 RETRIES = 100
+
+KEY_ERROR_RETRIES = 3
 
 
 class BlockHandleReaderWriter(DatastoreClient):
@@ -57,7 +60,10 @@ class BlockHandleReaderWriter(DatastoreClient):
         """
         key = _block_datastore_key(block_cidr)
         try:
-            result = self.etcd_client.read(key)
+            # Use quorum=True to ensure we don't get stale reads.  Without this
+            # we allow many subtle race conditions, such as creating a block,
+            # then later reading it and finding it doesn't exist.
+            result = self.etcd_client.read(key, quorum=True)
         except EtcdKeyNotFound:
             raise KeyError(str(block_cidr))
         block = AllocationBlock.from_etcd_result(result)
@@ -98,7 +104,7 @@ class BlockHandleReaderWriter(DatastoreClient):
                                           "version": version}
         block_ids = []
         try:
-            result = self.etcd_client.read(path).children
+            result = self.etcd_client.read(path, quorum=True).children
             for child in result:
                 packed = child.key.split("/")
                 if len(packed) == 9:
@@ -141,7 +147,7 @@ class BlockHandleReaderWriter(DatastoreClient):
                 _log.debug("Checking if block %s is free.", block_id)
                 key = _block_datastore_key(block_cidr)
                 try:
-                    _ = self.etcd_client.read(key)
+                    _ = self.etcd_client.read(key, quorum=True)
                 except EtcdKeyNotFound:
                     _log.debug("Found block %s free.", block_id)
                     try:
@@ -292,7 +298,7 @@ class BlockHandleReaderWriter(DatastoreClient):
         """
         key = _handle_datastore_key(handle_id)
         try:
-            result = self.etcd_client.read(key)
+            result = self.etcd_client.read(key, quorum=True)
         except EtcdKeyNotFound:
             raise KeyError(handle_id)
         handle = AllocationHandle.from_etcd_result(result)
@@ -444,21 +450,48 @@ class IPAMClient(BlockHandleReaderWriter):
         block_list = self._get_affine_blocks(hostname,
                                              ip_version,
                                              pool)
-        block_ids = iter(block_list)
+        block_ids = list(block_list)
+        key_errors = 0
         allocated_ips = []
 
         num_remaining = num
         while num_remaining > 0:
             try:
-                block_id = block_ids.next()
-            except StopIteration:
+                block_id = block_ids.pop(0)
+            except IndexError:
                 _log.info("Ran out of affine blocks for %s in pool %s",
                           hostname, pool)
                 break
-            ips = self._auto_assign_block(block_id,
-                                          num_remaining,
-                                          handle_id,
-                                          attributes)
+            try:
+                ips = self._auto_assign_block(block_id,
+                                              num_remaining,
+                                              handle_id,
+                                              attributes)
+            except KeyError:
+                # In certain rare race conditions, _get_affine_blocks above
+                # can return block_ids that don't exist (due to multiple IPAM
+                # clients on this host running simultaneously).  If that
+                # happens, requeue the block_id for a retry, since we expect
+                # the other IPAM client to shortly create the block.  To stop
+                # endless looping we limit the number of KeyErrors that will
+                # generate a retry.
+                _log.warning("Tried to auto-assign to block %s.  Doesn't "
+                             "exist.", block_id)
+                key_errors += 1
+                if key_errors <= KEY_ERROR_RETRIES:
+                    _log.debug("Queueing block %s for retry.", block_id)
+                    block_ids.append(block_id)
+                else:
+                    _log.warning("Stopping retry of block %s.", block_id)
+                continue
+            except NoHostAffinityWarning:
+                # In certain rare race conditions, _get_affine_blocks above
+                # can return block_ids that don't actually have affinity to
+                # this host (due to multiple IPAM clients on this host running
+                # simultaneously).  If that happens, just move to the next one.
+                _log.warning("No host affinity on block %s; skipping.",
+                             block_id)
+                continue
             allocated_ips.extend(ips)
             num_remaining = num - len(allocated_ips)
 
