@@ -26,7 +26,7 @@ from pycalico.datastore_errors import DataStoreError, \
     ProfileNotInEndpoint, ProfileAlreadyInEndpoint, MultipleEndpointsMatch
 from pycalico.util import get_hostname
 
-ETCD_AUTHORITY_DEFAULT = "127.0.0.1:4001"
+ETCD_AUTHORITY_DEFAULT = "127.0.0.1:2379"
 ETCD_AUTHORITY_ENV = "ETCD_AUTHORITY"
 
 # etcd paths for Calico workloads, endpoints and IPAM.
