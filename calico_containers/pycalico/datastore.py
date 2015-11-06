@@ -29,6 +29,16 @@ from pycalico.util import get_hostname
 ETCD_AUTHORITY_DEFAULT = "127.0.0.1:2379"
 ETCD_AUTHORITY_ENV = "ETCD_AUTHORITY"
 
+# Secure etcd with SSL environment variables and paths
+ETCD_SCHEME_DEFAULT = "http"
+ETCD_SCHEME_ENV = "ETCD_SCHEME_ENV"
+ETCD_KEY_FILE_ENV = "ETCD_KEY_FILE"
+ETCD_KEY_NODE_FILE = "/etc/calico/ssl/key.pem"
+ETCD_CERT_FILE_ENV = "ETCD_CERT_FILE"
+ETCD_CERT_NODE_FILE = "/etc/calico/ssl/cert.crt"
+ETCD_CA_CERT_FILE_ENV = "ETCD_CA_CERT_FILE"
+ETCD_CA_CERT_NODE_FILE = "/etc/calico/ssl/ca_cert.crt"
+
 # etcd paths for Calico workloads, endpoints and IPAM.
 CALICO_V_PATH = "/calico/v1"
 CONFIG_PATH = CALICO_V_PATH + "/config/"
@@ -113,6 +123,51 @@ def handle_errors(fn):
     return wrapped
 
 
+def assert_valid_etcd_keys(scheme, key, cert, ca_cert):
+    """
+    Validate etcd SSL environment variables set on the host machine.  The key
+    and certificate values must both be set or not set.  All values passed
+    in must be readable.
+
+    Raise a DataStoreError if any assertions fail.
+
+    :param scheme: HTTP protocol type. One of: "", "http", or "https"
+    :param key: Path to secure key for etcd or None value
+    :param cert: Path to secure certificate for etcd or None value
+    :param ca_cert: Path to Certificate Authority signing certificate for etcd
+    of None value
+    """
+    if scheme == "https":
+        # etcd key and certificate must be both specified or both not specified
+        if bool(key) != bool(cert):
+            raise DataStoreError("Invalid %s, %s combination. Key and "
+                                 "certificate must both be specified or both "
+                                 "be blank. Values provided: %s=%s, %s=%s" %
+                                 (ETCD_KEY_FILE_ENV, ETCD_CERT_FILE_ENV,
+                                  ETCD_KEY_FILE_ENV, key,
+                                  ETCD_CERT_FILE_ENV, cert))
+        # Make sure etcd key and certificate are readable
+        if key and cert:
+            if not (os.access(key, os.R_OK) and os.access(cert, os.R_OK)):
+                raise DataStoreError("Cannot read %s and/or %s. Both must be "
+                                     "readable file paths. Values provided: "
+                                     "%s=%s, %s=%s" % (ETCD_KEY_FILE_ENV,
+                                                       ETCD_CERT_FILE_ENV,
+                                                       ETCD_KEY_FILE_ENV,
+                                                       key,
+                                                       ETCD_CERT_FILE_ENV,
+                                                       cert))
+            # If Certificate Authority cert file provided, check it's readable
+            if ca_cert and not os.access(ca_cert, os.R_OK):
+                raise DataStoreError("Cannot read %s. Value must be readable "
+                                     "file path. Value provided: %s" %
+                                     (ETCD_CA_CERT_FILE_ENV, ca_cert))
+    elif not (scheme == "http" or scheme == ""):
+        raise DataStoreError("Invalid %s. Value must be one of: \"\", "
+                             "\"http\", \"https\". Value provided: %s" %
+                             (ETCD_SCHEME_ENV, scheme))
+
+
 class DatastoreClient(object):
     """
     An datastore client that exposes high level Calico operations needed by the
@@ -122,8 +177,20 @@ class DatastoreClient(object):
     def __init__(self):
         etcd_authority = os.getenv(ETCD_AUTHORITY_ENV, ETCD_AUTHORITY_DEFAULT)
         (host, port) = etcd_authority.split(":", 1)
+
+        etcd_scheme = os.getenv(ETCD_SCHEME_ENV, ETCD_SCHEME_DEFAULT)
+        etcd_key = os.getenv(ETCD_KEY_FILE_ENV, '')
+        etcd_cert = os.getenv(ETCD_CERT_FILE_ENV, '')
+        etcd_ca = os.getenv(ETCD_CA_CERT_FILE_ENV, '')
+        key_pair = (etcd_cert, etcd_key)
+
+        assert_valid_etcd_keys(etcd_scheme, etcd_key, etcd_cert, etcd_ca)
+
         self.etcd_client = etcd.Client(host=host,
-                                       port=int(port))
+                                       port=int(port),
+                                       protocol=etcd_scheme,
+                                       cert=key_pair,
+                                       ca_cert=etcd_ca)
 
     @handle_errors
     def ensure_global_config(self):
