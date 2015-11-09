@@ -134,6 +134,10 @@ class DatastoreClient(object):
         etcd_key = os.getenv(ETCD_KEY_FILE_ENV, '')
         etcd_cert = os.getenv(ETCD_CERT_FILE_ENV, '')
         etcd_ca = os.getenv(ETCD_CA_CERT_FILE_ENV, '')
+        print "etcd_scheme is %s" % etcd_scheme
+        print "etcd_key is %s" % etcd_key
+        print "etcd_cert is %s" % etcd_cert
+        print "etcd_ca is %s" % etcd_ca
         key_pair = (etcd_cert, etcd_key) if (etcd_cert and etcd_key) else None
 
         if etcd_scheme == "https":
