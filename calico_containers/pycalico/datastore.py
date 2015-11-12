@@ -148,8 +148,10 @@ class DatastoreClient(object):
                                                 ETCD_CERT_FILE_ENV, etcd_cert))
             # Make sure etcd key and certificate are readable
             if etcd_key and etcd_cert:
-                if not (os.access(etcd_key, os.R_OK) and
-                            os.access(etcd_cert, os.R_OK)):
+                if not (os.path.isfile(etcd_key) and
+                        os.access(etcd_key, os.R_OK) and
+                        os.path.isfile(etcd_cert) and
+                        os.access(etcd_cert, os.R_OK)):
                     raise DataStoreError("Cannot read %s and/or %s. Both must "
                                          "be readable file paths. Values "
                                          "provided: %s=%s, %s=%s" %
@@ -158,7 +160,8 @@ class DatastoreClient(object):
                                           ETCD_KEY_FILE_ENV, etcd_key,
                                           ETCD_CERT_FILE_ENV, etcd_cert))
                 # If Certificate Authority cert provided, check it's readable
-                if etcd_ca and not os.access(etcd_ca, os.R_OK):
+                if etcd_ca and not (os.path.isfile(etcd_ca) and
+                                    os.access(etcd_ca, os.R_OK)):
                     raise DataStoreError("Cannot read %s. Value must be "
                                          "readable file path. Value provided: "
                                          "%s" % (ETCD_CA_CERT_FILE_ENV,
@@ -168,6 +171,8 @@ class DatastoreClient(object):
                                  "\"http\", \"https\". Value provided: %s" %
                                  (ETCD_SCHEME_ENV, etcd_scheme))
 
+        # Set CA value to None if it is a None-value string
+        etcd_ca = None if not etcd_ca else etcd_ca
         self.etcd_client = etcd.Client(host=host,
                                        port=int(port),
                                        protocol=etcd_scheme,

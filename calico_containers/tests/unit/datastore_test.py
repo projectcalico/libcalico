@@ -23,8 +23,10 @@ from netaddr import IPNetwork, IPAddress, AddrFormatError
 from nose.tools import *
 from mock import patch, Mock, call
 
-from pycalico.datastore import (DatastoreClient,
-                                                  CALICO_V_PATH)
+from pycalico.datastore import (DatastoreClient, CALICO_V_PATH,
+                                ETCD_SCHEME_ENV, ETCD_SCHEME_DEFAULT,
+                                ETCD_AUTHORITY_ENV, ETCD_CA_CERT_FILE_ENV,
+                                ETCD_CERT_FILE_ENV, ETCD_KEY_FILE_ENV)
 from pycalico.datastore_errors import DataStoreError, ProfileNotInEndpoint, ProfileAlreadyInEndpoint, \
     MultipleEndpointsMatch
 from pycalico.datastore_datatypes import Rules, BGPPeer, IPPool, \
@@ -80,6 +82,14 @@ EP_90.profile_ids = ["UNIT"]
 EP_12 = Endpoint(TEST_HOST, "docker", TEST_CONT_ID, TEST_ENDPOINT_ID,
                  "active", "11-22-33-44-55-66")
 EP_12.profile_ids = ["UNIT"]
+
+ETCD_ENV_DICT = {
+    ETCD_AUTHORITY_ENV   : "127.0.0.2:4002",
+    ETCD_SCHEME_ENV      : ETCD_SCHEME_DEFAULT,
+    ETCD_KEY_FILE_ENV    : "",
+    ETCD_CERT_FILE_ENV   : "",
+    ETCD_CA_CERT_FILE_ENV: ""
+}
 
 # A complicated set of Rules JSON for testing serialization / deserialization.
 RULES_JSON = """
@@ -452,11 +462,15 @@ class TestDatastoreClient(unittest.TestCase):
     @patch("pycalico.datastore.os.getenv", autospec=True)
     @patch("pycalico.datastore.etcd.Client", autospec=True)
     def setUp(self, m_etcd_client, m_getenv):
-        m_getenv.return_value = "127.0.0.2:4002"
+        def m_getenv_return(key, *args):
+            return ETCD_ENV_DICT[key]
+        m_getenv.side_effect = m_getenv_return
         self.etcd_client = Mock(spec=EtcdClient)
         m_etcd_client.return_value = self.etcd_client
         self.datastore = DatastoreClient()
-        m_etcd_client.assert_called_once_with(host="127.0.0.2", port=4002)
+        m_etcd_client.assert_called_once_with(host="127.0.0.2", port=4002,
+                                              protocol="http", cert=None,
+                                              ca_cert=None)
 
     @patch('pycalico.datastore.get_hostname', autospec=True)
     def test_ensure_global_config(self, m_gethostname):
