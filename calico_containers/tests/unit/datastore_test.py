@@ -21,6 +21,7 @@ from pycalico import netns
 from mock import ANY
 from netaddr import IPNetwork, IPAddress, AddrFormatError
 from nose.tools import *
+from nose_parameterized import parameterized
 from mock import patch, Mock, call
 
 from pycalico.datastore import (DatastoreClient, CALICO_V_PATH,
@@ -1682,6 +1683,238 @@ class TestDatastoreClient(unittest.TestCase):
         self.etcd_client.read.side_effect = EtcdKeyNotFound
 
         assert_raises(KeyError, self.datastore.get_host_bgp_ips, TEST_HOST)
+
+
+class TestSecureDatastoreClient(unittest.TestCase):
+
+    @patch("pycalico.datastore.os.getenv", autospec=True)
+    @patch("pycalico.datastore.etcd.Client", autospec=True)
+    @patch("pycalico.datastore.os.access", autospec=True)
+    @patch("pycalico.datastore.os.path.isfile", autospec=True)
+    def test_secure_etcd_no_ca(self, m_isfile, m_access, m_etcd_client,
+                               m_getenv):
+        """ Test validation for secure etcd with no CA file. """
+        m_isfile.return_value = True
+        m_access.return_value = True
+        key_file = "/path/to/key_file"
+        cert_file = "/path/to/cert_file"
+        etcd_env_dict = {
+            ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
+            ETCD_SCHEME_ENV      : "https",
+            ETCD_KEY_FILE_ENV    : key_file,
+            ETCD_CERT_FILE_ENV   : cert_file,
+            ETCD_CA_CERT_FILE_ENV: ""
+        }
+
+        def m_getenv_return(key, *args):
+            return etcd_env_dict[key]
+        m_getenv.side_effect = m_getenv_return
+        self.etcd_client = Mock(spec=EtcdClient)
+        m_etcd_client.return_value = self.etcd_client
+        self.datastore = DatastoreClient()
+        m_etcd_client.assert_called_once_with(host="127.0.1.1",
+                                              port=2380,
+                                              protocol="https",
+                                              cert=(cert_file, key_file),
+                                              ca_cert=None)
+
+    @patch("pycalico.datastore.os.getenv", autospec=True)
+    @patch("pycalico.datastore.etcd.Client", autospec=True)
+    @patch("pycalico.datastore.os.access", autospec=True)
+    @patch("pycalico.datastore.os.path.isfile", autospec=True)
+    def test_secure_etcd_ca(self, m_isfile, m_access, m_etcd_client, m_getenv):
+        """ Test validation for secure etcd with a CA file. """
+        m_isfile.return_value = True
+        m_access.return_value = True
+        key_file = "/path/to/key_file"
+        cert_file = "/path/to/cert_file"
+        ca_file = "/path/to/ca_file"
+        etcd_env_dict = {
+            ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
+            ETCD_SCHEME_ENV      : "https",
+            ETCD_KEY_FILE_ENV    : key_file,
+            ETCD_CERT_FILE_ENV   : cert_file,
+            ETCD_CA_CERT_FILE_ENV: ca_file
+        }
+
+        def m_getenv_return(key, *args):
+            return etcd_env_dict[key]
+        m_getenv.side_effect = m_getenv_return
+        self.etcd_client = Mock(spec=EtcdClient)
+        m_etcd_client.return_value = self.etcd_client
+        self.datastore = DatastoreClient()
+        m_etcd_client.assert_called_once_with(host="127.0.1.1",
+                                              port=2380,
+                                              protocol="https",
+                                              cert=(cert_file, key_file),
+                                              ca_cert=ca_file)
+
+    @patch("pycalico.datastore.os.getenv", autospec=True)
+    @patch("pycalico.datastore.etcd.Client", autospec=True)
+    @patch("pycalico.datastore.os.access", autospec=True)
+    @patch("pycalico.datastore.os.path.isfile", autospec=True)
+    def test_secure_etcd_bad_scheme(self, m_isfile, m_access,
+                                    m_etcd_client, m_getenv):
+        """
+        Test validation for secure etcd fails when scheme is unrecognized.
+        """
+        m_isfile.return_value = True
+        m_access.return_value = True
+        etcd_env_dict = {
+            ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
+            ETCD_SCHEME_ENV      : "htt",
+            ETCD_KEY_FILE_ENV    : "",
+            ETCD_CERT_FILE_ENV   : "",
+            ETCD_CA_CERT_FILE_ENV: ""
+        }
+
+        def m_getenv_return(key, *args):
+            return etcd_env_dict[key]
+        m_getenv.side_effect = m_getenv_return
+        self.etcd_client = Mock(spec=EtcdClient)
+        m_etcd_client.return_value = self.etcd_client
+        self.assertRaises(DataStoreError, DatastoreClient)
+        self.assertFalse(m_etcd_client.called)
+
+    @patch("pycalico.datastore.os.getenv", autospec=True)
+    @patch("pycalico.datastore.etcd.Client", autospec=True)
+    @patch("pycalico.datastore.os.access", autospec=True)
+    @patch("pycalico.datastore.os.path.isfile", autospec=True)
+    def test_secure_etcd_missing_cert(self, m_isfile, m_access,
+                                      m_etcd_client, m_getenv):
+        """
+        Test validation for secure etcd fails when key is given but cert is
+        not.
+        """
+        m_isfile.return_value = True
+        m_access.return_value = True
+        etcd_env_dict = {
+            ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
+            ETCD_SCHEME_ENV      : "https",
+            ETCD_KEY_FILE_ENV    : "/path/to/key_file",
+            ETCD_CERT_FILE_ENV   : "",
+            ETCD_CA_CERT_FILE_ENV: ""
+        }
+
+        def m_getenv_return(key, *args):
+            return etcd_env_dict[key]
+        m_getenv.side_effect = m_getenv_return
+        self.etcd_client = Mock(spec=EtcdClient)
+        m_etcd_client.return_value = self.etcd_client
+        self.assertRaises(DataStoreError, DatastoreClient)
+        self.assertFalse(m_etcd_client.called)
+
+    @patch("pycalico.datastore.os.getenv", autospec=True)
+    @patch("pycalico.datastore.etcd.Client", autospec=True)
+    @patch("pycalico.datastore.os.access", autospec=True)
+    @patch("pycalico.datastore.os.path.isfile", autospec=True)
+    def test_secure_etcd_missing_key(self, m_isfile, m_access,
+                                     m_etcd_client, m_getenv):
+        """
+        Test validation for secure etcd fails when cert is given but key is
+        not.
+        """
+        m_isfile.return_value = True
+        m_access.return_value = True
+        etcd_env_dict = {
+            ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
+            ETCD_SCHEME_ENV      : "https",
+            ETCD_KEY_FILE_ENV    : "",
+            ETCD_CERT_FILE_ENV   : "/path/to/cert_file",
+            ETCD_CA_CERT_FILE_ENV: ""
+        }
+
+        def m_getenv_return(key, *args):
+            return etcd_env_dict[key]
+        m_getenv.side_effect = m_getenv_return
+        self.etcd_client = Mock(spec=EtcdClient)
+        m_etcd_client.return_value = self.etcd_client
+        self.assertRaises(DataStoreError, DatastoreClient)
+        self.assertFalse(m_etcd_client.called)
+
+    @patch("pycalico.datastore.os.getenv", autospec=True)
+    @patch("pycalico.datastore.etcd.Client", autospec=True)
+    @patch("pycalico.datastore.os.access", autospec=True)
+    @patch("pycalico.datastore.os.path.isfile", autospec=True)
+    def test_secure_etcd_key_not_file(self, m_isfile, m_access,
+                                      m_etcd_client, m_getenv):
+        """
+        Test validation for secure etcd fails when key is not a file.
+        """
+        m_isfile.return_value = False
+        m_access.return_value = True
+        etcd_env_dict = {
+            ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
+            ETCD_SCHEME_ENV      : "https",
+            ETCD_KEY_FILE_ENV    : "/path/to/key_dir/",
+            ETCD_CERT_FILE_ENV   : "/path/to/cert_file",
+            ETCD_CA_CERT_FILE_ENV: "/path/to/ca_file"
+        }
+
+        def m_getenv_return(key, *args):
+            return etcd_env_dict[key]
+        m_getenv.side_effect = m_getenv_return
+
+        self.etcd_client = Mock(spec=EtcdClient)
+        m_etcd_client.return_value = self.etcd_client
+        self.assertRaises(DataStoreError, DatastoreClient)
+        self.assertFalse(m_etcd_client.called)
+
+    @patch("pycalico.datastore.os.getenv", autospec=True)
+    @patch("pycalico.datastore.etcd.Client", autospec=True)
+    @patch("pycalico.datastore.os.access", autospec=True)
+    @patch("pycalico.datastore.os.path.isfile", autospec=True)
+    def test_secure_etcd_cert_not_readable(self, m_isfile, m_access,
+                                           m_etcd_client, m_getenv):
+        """
+        Test validation for secure etcd fails when cert is not a readable.
+        """
+        m_isfile.return_value = True
+        m_access.side_effect = [True, False]
+        etcd_env_dict = {
+            ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
+            ETCD_SCHEME_ENV      : "https",
+            ETCD_KEY_FILE_ENV    : "/path/to/key_file",
+            ETCD_CERT_FILE_ENV   : "/path/to/bad_cert",
+            ETCD_CA_CERT_FILE_ENV: "/path/to/ca_file"
+        }
+
+        def m_getenv_return(key, *args):
+            return etcd_env_dict[key]
+        m_getenv.side_effect = m_getenv_return
+
+        self.etcd_client = Mock(spec=EtcdClient)
+        m_etcd_client.return_value = self.etcd_client
+        self.assertRaises(DataStoreError, DatastoreClient)
+        self.assertFalse(m_etcd_client.called)
+
+    @patch("pycalico.datastore.os.getenv", autospec=True)
+    @patch("pycalico.datastore.etcd.Client", autospec=True)
+    @patch("pycalico.datastore.os.access", autospec=True)
+    @patch("pycalico.datastore.os.path.isfile")
+    def test_secure_etcd_ca_not_file(self, m_isfile, m_access,
+                                     m_etcd_client, m_getenv):
+        """
+        Test validation for secure etcd fails when ca is not a file.
+        """
+        m_isfile.side_effect = [True, True, False]
+        m_access.return_value = True
+        etcd_env_dict = {
+            ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
+            ETCD_SCHEME_ENV      : "https",
+            ETCD_KEY_FILE_ENV    : "/path/to/key_file",
+            ETCD_CERT_FILE_ENV   : "/path/to/cert_file",
+            ETCD_CA_CERT_FILE_ENV: "/path/to/not_readable"
+        }
+
+        def m_getenv_return(key, *args):
+            return etcd_env_dict[key]
+        m_getenv.side_effect = m_getenv_return
+
+        self.etcd_client = Mock(spec=EtcdClient)
+        m_etcd_client.return_value = self.etcd_client
+        self.assertRaises(DataStoreError, DatastoreClient)
+        self.assertFalse(m_etcd_client.called)
 
 
 def mock_read_2_peers(path):
