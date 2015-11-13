@@ -76,7 +76,7 @@ def increment_metrics(namespace):
                     assigned_metrics.append(metric + 1)
 
 
-def create_veth(veth_name_host, veth_name_ns_temp):
+def create_veth(veth_name_host, veth_name_ns_temp, mtu=None):
     """
     Create the veth (pair).
     :param veth_name_host: The name of the veth interface
@@ -87,14 +87,20 @@ def create_veth(veth_name_host, veth_name_ns_temp):
     # Create the veth
     _log.debug("Creating veth %s in temp_ns: %s", veth_name_host, veth_name_ns_temp)
     check_output(['ip', 'link',
-                'add', veth_name_host,
-                'type', 'veth',
-                'peer', 'name', veth_name_ns_temp],
-               timeout=IP_CMD_TIMEOUT)
+                  'add', veth_name_host,
+                  'type', 'veth',
+                  'peer', 'name', veth_name_ns_temp],
+                 timeout=IP_CMD_TIMEOUT)
 
-    # Set the host end of the veth to 'up' so felix notices it.
-    check_output(['ip', 'link', 'set', veth_name_host, 'up'],
-               timeout=IP_CMD_TIMEOUT)
+    if mtu:
+        check_output(['ip', 'link',
+                      'set', veth_name_host, 'up',
+                      'mtu', str(mtu)],
+                     timeout=IP_CMD_TIMEOUT)
+    else:
+        check_output(['ip', 'link',
+                      'set', veth_name_host, 'up'],
+                     timeout=IP_CMD_TIMEOUT)
 
 
 def remove_veth(veth_name_host):
@@ -146,7 +152,7 @@ def ns_veth_exists(namespace, veth_name_ns):
             return False
 
 
-def move_veth_into_ns(namespace, veth_name_ns_temp, veth_name_ns):
+def move_veth_into_ns(namespace, veth_name_ns_temp, veth_name_ns, mtu=None):
     """
     Move the veth into the namespace.
 
@@ -160,12 +166,21 @@ def move_veth_into_ns(namespace, veth_name_ns_temp, veth_name_ns):
     with NamedNamespace(namespace) as ns:
         _log.debug("Moving temp interface %s into ns %s.", veth_name_ns_temp, ns.name)
         # Create the veth pair and move one end into container:
-        check_output(["ip", "link", "set", veth_name_ns_temp,
-                    "netns", ns.name],
-                   timeout=IP_CMD_TIMEOUT)
-        ns.check_output(["ip", "link", "set", "dev", veth_name_ns_temp,
-                       "name", veth_name_ns])
-        ns.check_output(["ip", "link", "set", veth_name_ns, "up"])
+        check_output(["ip", "link",
+                      "set", veth_name_ns_temp,
+                      "netns", ns.name],
+                     timeout=IP_CMD_TIMEOUT)
+        ns.check_output(["ip", "link",
+                         "set", "dev", veth_name_ns_temp,
+                         "name", veth_name_ns])
+
+        if mtu:
+            ns.check_output(["ip", "link",
+                             "set", veth_name_ns, "up",
+                             "mtu", str(mtu)])
+        else:
+            ns.check_output(["ip", "link",
+                             "set", veth_name_ns, "up"])
 
 
 def set_veth_mac(veth_name_host, mac):
