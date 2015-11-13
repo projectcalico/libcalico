@@ -25,11 +25,6 @@ from pycalico.datastore_datatypes import Rules, BGPPeer, IPPool, \
 from pycalico.datastore_errors import DataStoreError, \
     ProfileNotInEndpoint, ProfileAlreadyInEndpoint, MultipleEndpointsMatch
 from pycalico.util import get_hostname
-import logging
-
-# Suppress warnings from urllib3 when etcd is used without CA cert.
-logging.captureWarnings(True)
-_log = logging.getLogger(__name__)
 
 ETCD_AUTHORITY_DEFAULT = "127.0.0.1:2379"
 ETCD_AUTHORITY_ENV = "ETCD_AUTHORITY"
