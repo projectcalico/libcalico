@@ -1691,19 +1691,18 @@ class TestSecureDatastoreClient(unittest.TestCase):
     @patch("pycalico.datastore.etcd.Client", autospec=True)
     @patch("pycalico.datastore.os.access", autospec=True)
     @patch("pycalico.datastore.os.path.isfile", autospec=True)
-    def test_secure_etcd_no_ca(self, m_isfile, m_access, m_etcd_client,
+    def test_secure_etcd_no_cert_key(self, m_isfile, m_access, m_etcd_client,
                                m_getenv):
-        """ Test validation for secure etcd with no CA file. """
+        """ Test validation for secure etcd with just a CA file. """
         m_isfile.return_value = True
         m_access.return_value = True
-        key_file = "/path/to/key_file"
-        cert_file = "/path/to/cert_file"
+        ca_file = "/path/to/ca_file"
         etcd_env_dict = {
             ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
             ETCD_SCHEME_ENV      : "https",
-            ETCD_KEY_FILE_ENV    : key_file,
-            ETCD_CERT_FILE_ENV   : cert_file,
-            ETCD_CA_CERT_FILE_ENV: ""
+            ETCD_KEY_FILE_ENV    : "",
+            ETCD_CERT_FILE_ENV   : "",
+            ETCD_CA_CERT_FILE_ENV: ca_file
         }
 
         def m_getenv_return(key, *args):
@@ -1715,15 +1714,15 @@ class TestSecureDatastoreClient(unittest.TestCase):
         m_etcd_client.assert_called_once_with(host="127.0.1.1",
                                               port=2380,
                                               protocol="https",
-                                              cert=(cert_file, key_file),
-                                              ca_cert=None)
+                                              cert=None,
+                                              ca_cert=ca_file)
 
     @patch("pycalico.datastore.os.getenv", autospec=True)
     @patch("pycalico.datastore.etcd.Client", autospec=True)
     @patch("pycalico.datastore.os.access", autospec=True)
     @patch("pycalico.datastore.os.path.isfile", autospec=True)
     def test_secure_etcd_ca(self, m_isfile, m_access, m_etcd_client, m_getenv):
-        """ Test validation for secure etcd with a CA file. """
+        """ Test validation for secure etcd with key, cert, and CA file. """
         m_isfile.return_value = True
         m_access.return_value = True
         key_file = "/path/to/key_file"
