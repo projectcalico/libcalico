@@ -147,25 +147,24 @@ class DatastoreClient(object):
                                                 ETCD_KEY_FILE_ENV, etcd_key,
                                                 ETCD_CERT_FILE_ENV, etcd_cert))
             # Make sure etcd key and certificate are readable
-            if etcd_key and etcd_cert:
-                if not (os.path.isfile(etcd_key) and
-                        os.access(etcd_key, os.R_OK) and
-                        os.path.isfile(etcd_cert) and
-                        os.access(etcd_cert, os.R_OK)):
-                    raise DataStoreError("Cannot read %s and/or %s. Both must "
-                                         "be readable file paths. Values "
-                                         "provided: %s=%s, %s=%s" %
-                                         (ETCD_KEY_FILE_ENV,
-                                          ETCD_CERT_FILE_ENV,
-                                          ETCD_KEY_FILE_ENV, etcd_key,
-                                          ETCD_CERT_FILE_ENV, etcd_cert))
-                # If Certificate Authority cert provided, check it's readable
-                if etcd_ca and not (os.path.isfile(etcd_ca) and
-                                    os.access(etcd_ca, os.R_OK)):
-                    raise DataStoreError("Cannot read %s. Value must be "
-                                         "readable file path. Value provided: "
-                                         "%s" % (ETCD_CA_CERT_FILE_ENV,
-                                                 etcd_ca))
+            if etcd_key and etcd_cert and not (os.path.isfile(etcd_key) and
+                                               os.access(etcd_key, os.R_OK) and
+                                               os.path.isfile(etcd_cert) and
+                                               os.access(etcd_cert, os.R_OK)):
+                raise DataStoreError("Cannot read %s and/or %s. Both must "
+                                     "be readable file paths. Values "
+                                     "provided: %s=%s, %s=%s" %
+                                     (ETCD_KEY_FILE_ENV,
+                                      ETCD_CERT_FILE_ENV,
+                                      ETCD_KEY_FILE_ENV, etcd_key,
+                                      ETCD_CERT_FILE_ENV, etcd_cert))
+            # Certificate Authority cert must be provided, check it's readable
+            if not etcd_ca or not (os.path.isfile(etcd_ca) and
+                                   os.access(etcd_ca, os.R_OK)):
+                raise DataStoreError("Invalid %s. Certificate Authority "
+                                     "cert is required and must be a "
+                                     "readable file path. Value provided: "
+                                     "%s" % (ETCD_CA_CERT_FILE_ENV, etcd_ca))
         elif etcd_scheme != "http":
             raise DataStoreError("Invalid %s. Value must be one of: \"\", "
                                  "\"http\", \"https\". Value provided: %s" %
