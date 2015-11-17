@@ -133,7 +133,7 @@ class BlockHandleReaderWriter(DatastoreClient):
         :return: The block CIDR of the new block.
         """
         # Get the pools and verify we got a valid one, or none.
-        ip_pools = self.get_ip_pools(version)
+        ip_pools = self.get_ip_pools(version, ipam=True)
         if pool is not None:
             if pool not in ip_pools:
                 raise ValueError("Requested pool %s is not configured or has"
@@ -207,7 +207,7 @@ class BlockHandleReaderWriter(DatastoreClient):
         """
 
         # Get the pools and verify we got a valid one, or none.
-        ip_pools = self.get_ip_pools(version)
+        ip_pools = self.get_ip_pools(version, ipam=True)
         if pool is not None:
             if pool not in ip_pools:
                 raise ValueError("Requested pool %s is not configured or has"
@@ -410,12 +410,12 @@ class IPAMClient(BlockHandleReaderWriter):
 
         _log.info("Auto-assign %d IPv4, %d IPv6 addrs",
                   num_v4, num_v6)
-        v4_address_list = self._auto_assign(4, num_v4, handle_id,
-                                            attributes, pool[0], hostname)
+        v4_address_list = self._auto_assign(4, num_v4, handle_id, attributes,
+                                            pool[0], hostname)
         _log.info("Auto-assigned IPv4s %s",
                   [str(addr) for addr in v4_address_list])
-        v6_address_list = self._auto_assign(6, num_v6, handle_id,
-                                            attributes, pool[1], hostname)
+        v6_address_list = self._auto_assign(6, num_v6, handle_id, attributes,
+                                            pool[1], hostname)
         _log.info("Auto-assigned IPv6s %s",
                   [str(addr) for addr in v6_address_list])
         return v4_address_list, v6_address_list
@@ -619,7 +619,7 @@ class IPAMClient(BlockHandleReaderWriter):
                 block = self._read_block(block_cidr)
             except KeyError:
                 _log.debug("Block %s doesn't exist.", block_cidr)
-                pools = self.get_ip_pools(address.version)
+                pools = self.get_ip_pools(address.version, ipam=True)
                 if any([address in pool for pool in pools]):
                     _log.debug("Create and claim block %s.",
                                block_cidr)

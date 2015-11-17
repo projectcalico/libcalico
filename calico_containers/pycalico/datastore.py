@@ -326,11 +326,15 @@ class DatastoreClient(object):
             return (ipv4, ipv6)
 
     @handle_errors
-    def get_ip_pools(self, version):
+    def get_ip_pools(self, version, ipam=None):
         """
         Get the configured IP pools.
 
         :param version: 4 for IPv4, 6 for IPv6
+        :param ipam:  Filter on the ipam flag.  If None, all IP Pools are
+        returned.  If False, only pools that are not used by Calico IPAM are
+        returned.  If True, only pools that are used by Calico IPAM are
+        returned.
         :return: List of IPPool.
         """
         assert version in (4, 6)
@@ -346,6 +350,10 @@ class DatastoreClient(object):
             # read returns the parent directory.
             pools = [IPPool.from_json(leaf.value) for leaf in leaves
                                                   if leaf.value]
+
+            # If required, filter out pools that are not used for Calico IPAM.
+            if ipam is not None:
+                pools = [pool for pool in pools if pool.ipam == ipam]
 
         return pools
 

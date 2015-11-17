@@ -432,15 +432,22 @@ class TestIPPool(unittest.TestCase):
         """
         Test IPPool equality operator.
         """
-        ippool1 = IPPool("1.2.3.4/24", ipip=True, masquerade=True)
-        ippool2 = IPPool(IPNetwork("1.2.3.8/24"), ipip=True, masquerade=True)
-        ippool3 = IPPool("1.2.3.4/24", ipip=True)
-        ippool4 = IPPool("1.2.3.4/24", masquerade=True)
-        ippool5 = IPPool("1.2.3.4/24")
+        ippool1 = IPPool("1.2.3.4/24",
+                         ipip=True, masquerade=True, ipam=False)
+        ippool2 = IPPool(IPNetwork("1.2.3.8/24"),
+                         ipip=True, masquerade=True, ipam=False)
+        ippool3 = IPPool("1.2.3.4/24",
+                         ipip=True, ipam=False)
+        ippool4 = IPPool("1.2.3.4/24",
+                         masquerade=True, ipam=False)
+        ippool5 = IPPool("1.2.3.4/24",
+                         ipip=True, masquerade=True)
+        ippool6 = IPPool("1.2.3.4/24")
         assert_equal(ippool1, ippool2)
         assert_false(ippool1 == ippool3)
         assert_false(ippool1 == ippool4)
         assert_false(ippool1 == ippool5)
+        assert_false(ippool1 == ippool6)
         assert_false(ippool1 == "This is not an IPPool")
 
     def test_contains(self):
@@ -908,7 +915,11 @@ class TestDatastoreClient(unittest.TestCase):
         """
         self.etcd_client.read.side_effect = mock_read_2_pools
         pools = self.datastore.get_ip_pools(4)
-        assert_list_equal([IPPool("192.168.3.0/24"), IPPool("192.168.5.0/24")],
+        assert_list_equal([IPPool("192.168.3.0/24"),
+                           IPPool("192.168.5.0/24", ipam=False)],
+                          pools)
+        pools = self.datastore.get_ip_pools(4, ipam=True)
+        assert_list_equal([IPPool("192.168.3.0/24")],
                           pools)
 
     def test_get_ip_pools_no_key(self):
@@ -945,14 +956,16 @@ class TestDatastoreClient(unittest.TestCase):
             result.key = path
             result.value = "{\"cidr\": \"1.2.0.0/16\"," \
                             "\"ipip\": \"tunl0\"," \
-                            "\"masquerade\": true}"
+                            "\"masquerade\": true," \
+                            "\"ipam\": false}"
             return result
 
         self.etcd_client.read.side_effect = mock_read
         config = self.datastore.get_ip_pool_config(4,
                                                    IPNetwork("1.2.3.4/16"))
         assert_equal(config,
-                     IPPool("1.2.0.0/16", ipip=True, masquerade=True))
+                     IPPool("1.2.0.0/16", ipip=True, masquerade=True,
+                            ipam=False))
 
     def test_get_ip_pool_config_doesnt_exist(self):
         """
@@ -1003,7 +1016,8 @@ class TestDatastoreClient(unittest.TestCase):
         # Return false for the IP in IP global setting.
         self.etcd_client.read.side_effect = EtcdKeyNotFound
 
-        pool = IPPool("192.168.100.5/24", ipip=True, masquerade=True)
+        pool = IPPool("192.168.100.5/24", ipip=True, masquerade=True,
+                      ipam=False)
         self.datastore.add_ip_pool(4, pool)
         self.etcd_client.write.assert_has_calls(
                              [call(CONFIG_PATH + "IpInIpEnabled", "true"),
@@ -1012,7 +1026,8 @@ class TestDatastoreClient(unittest.TestCase):
         data = json.loads(raw_data)
         self.assertEqual(data, {'cidr': '192.168.100.0/24',
                                 "ipip": "tunl0",
-                                'masquerade': True})
+                                'masquerade': True,
+                                "ipam": False})
         self.assertEqual(pool, IPPool.from_json(raw_data))
 
     def test_del_ip_pool_exists(self):
@@ -1958,9 +1973,10 @@ def mock_read_2_pools(path, recursive=False):
     assert_equal(path, IPV4_POOLS_PATH)
     assert_true(recursive)
     children = []
-    for net in ["192.168.3.0/24", "192.168.5.0/24"]:
+    for net, ipam in [("192.168.3.0/24", "true"),
+                      ("192.168.5.0/24", "false")]:
         node = Mock(spec=EtcdResult)
-        node.value = "{\"cidr\": \"%s\"}" % net
+        node.value = "{\"cidr\": \"%s\",\"ipam\":%s}" % (net, ipam)
         node.key = IPV4_POOLS_PATH + net.replace("/", "-")
         children.append(node)
     result.leaves = iter(children)

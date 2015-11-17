@@ -122,17 +122,19 @@ class IPPool(object):
     Class encapsulating an IPPool.
     """
 
-    def __init__(self, cidr, ipip=False, masquerade=False):
+    def __init__(self, cidr, ipip=False, masquerade=False, ipam=True):
         """
         Constructor.
         :param cidr: IPNetwork object (or CIDR string) representing the pool
         :param ipip: Use IP-IP for this pool.
         :param masquerade: Enable masquerade (outgoing NAT) for this pool.
+        :param ipam: Whether this IPPool is used by Calico IPAM.
         """
         # Normalize the CIDR (e.g. 1.2.3.4/16 -> 1.2.0.0/16)
         self.cidr = IPNetwork(cidr).cidr
         self.ipip = bool(ipip)
         self.masquerade = bool(masquerade)
+        self.ipam = bool(ipam)
 
     def to_json(self):
         """
@@ -144,6 +146,10 @@ class IPPool(object):
             json_dict["ipip"] = "tunl0"
         if self.masquerade:
             json_dict["masquerade"] = True
+        # Only write IPAM when set to False, this keeps the behavior the same
+        # for old versions of the data.
+        if not self.ipam:
+            json_dict["ipam"] = False
         return json.dumps(json_dict)
 
     @classmethod
@@ -153,17 +159,21 @@ class IPPool(object):
         :param json_str: The JSON string representing an IPPool.
         :return: An IPPool object.
         """
+        # Note that "ipam" is a newer field that defaults to True, so set to
+        # True if not present in older JSON data.
         json_dict = json.loads(json_str)
         return cls(json_dict["cidr"],
                    ipip=json_dict.get("ipip"),
-                   masquerade=json_dict.get("masquerade"))
+                   masquerade=json_dict.get("masquerade"),
+                   ipam=json_dict.get("ipam", True))
 
     def __eq__(self, other):
         if not isinstance(other, IPPool):
             return NotImplemented
         return (self.cidr == other.cidr and
                 self.ipip == other.ipip and
-                self.masquerade == other.masquerade)
+                self.masquerade == other.masquerade and
+                self.ipam == other.ipam)
 
     def __contains__(self, item):
         """
