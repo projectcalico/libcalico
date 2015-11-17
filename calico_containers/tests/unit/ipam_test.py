@@ -156,8 +156,9 @@ class TestIPAMClient(unittest.TestCase):
         def m_get_affine_blocks(self, host, ip_version, pool):
             return [BLOCK_V4_1, BLOCK_V4_2]
 
-        def m_get_ip_pools(self, version):
+        def m_get_ip_pools(self, version, ipam):
             # The two claimed blocks are the only pools.
+            assert ipam
             return [IPPool(BLOCK_V4_1), IPPool(BLOCK_V4_2)]
 
         # 1st block has 2 free addresses.
@@ -335,7 +336,8 @@ class TestIPAMClient(unittest.TestCase):
         def m_get_affine_blocks(self, host, ip_version, pool):
             return []
 
-        def m_get_ip_pools(self, version):
+        def m_get_ip_pools(self, version, ipam):
+            assert ipam
             return [IPPool("192.168.0.0/16")]
 
         # Reads on 1, 4
@@ -382,7 +384,8 @@ class TestIPAMClient(unittest.TestCase):
                 rando_blocks.add(block)
             return block
 
-        def m_get_ip_pools(self, version):
+        def m_get_ip_pools(self, version, ipam):
+            assert ipam
             return [IPPool("10.11.0.0/18")]
 
         with patch("pycalico.ipam.BlockHandleReaderWriter._get_affine_blocks",
@@ -465,7 +468,8 @@ class TestIPAMClient(unittest.TestCase):
                 assert_true(False)
             return block
 
-        def m_get_ip_pools(self, version):
+        def m_get_ip_pools(self, version, ipam):
+            assert ipam
             return [IPPool("10.11.0.0/18")]
 
         with patch("pycalico.ipam.BlockHandleReaderWriter._get_affine_blocks",
@@ -504,7 +508,8 @@ class TestIPAMClient(unittest.TestCase):
         # Note that _get_new_affine_block calls etcd_client.read() directly.
         self.m_etcd_client.read.side_effect = EtcdKeyNotFound()
 
-        def m_get_ip_pools(self, version):
+        def m_get_ip_pools(self, version, ipam):
+            assert ipam
             return [IPPool("10.11.0.0/18")]
 
         with patch("pycalico.ipam.BlockHandleReaderWriter._get_affine_blocks",
@@ -661,7 +666,8 @@ class TestIPAMClient(unittest.TestCase):
         Test assign_ip() when address is in a block that hasn't been written.
         """
 
-        def m_get_ip_pools(self, version):
+        def m_get_ip_pools(self, version, ipam):
+            assert ipam
             return [IPPool("10.11.0.0/16"), IPPool("192.168.0.0/16")]
 
         # 1st read, doesn't exist.  2nd read, does exist, empty.
@@ -704,7 +710,8 @@ class TestIPAMClient(unittest.TestCase):
             7 Compare-and-swap new allocation with read from 3.
         """
 
-        def m_get_ip_pools(self, version):
+        def m_get_ip_pools(self, version, ipam):
+            assert ipam
             return [IPPool("10.11.0.0/16"), IPPool("192.168.0.0/16")]
 
         # 2nd read.
@@ -738,7 +745,8 @@ class TestIPAMClient(unittest.TestCase):
         Test assign_ip() when address is not in configured pools.
         """
 
-        def m_get_ip_pools(self, version):
+        def m_get_ip_pools(self, version, ipam):
+            assert ipam
             return [IPPool("10.11.0.0/16"), IPPool("192.168.0.0/16")]
 
         # block doesn't exist.
@@ -1441,7 +1449,8 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
             None  # 8
         ]
 
-        def m_get_ip_pools(_self, version):
+        def m_get_ip_pools(_self, version, ipam):
+            assert ipam
             return [IPPool("10.11.0.0/16"), IPPool("192.168.0.0/16")]
 
         with patch("pycalico.datastore.DatastoreClient.get_ip_pools",
@@ -1472,7 +1481,8 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         Test _new_affine_block when the pool given doesn't match.
         """
 
-        def m_get_ip_pools(_self, version):
+        def m_get_ip_pools(_self, version, ipam):
+            assert ipam
             return [IPPool("10.11.0.0/16"), IPPool("192.168.0.0/16")]
 
         with patch("pycalico.datastore.DatastoreClient.get_ip_pools",
@@ -1486,7 +1496,8 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         Test _new_affine_block limits to a single pool if requested.
         """
 
-        def m_get_ip_pools(_self, version):
+        def m_get_ip_pools(_self, version, ipam):
+            assert ipam
             return [IPPool("10.11.0.0/16"), IPPool("192.168.0.0/16")]
 
         # Reads are always successful
@@ -1510,7 +1521,8 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         """
         Test _random_blocks() mainline.
         """
-        def m_get_ip_pools(_self, version):
+        def m_get_ip_pools(_self, version, ipam):
+            assert ipam
             return [IPPool("10.11.0.0/16")]
 
         excluded_ids = [IPNetwork("10.11.23.0/26"),
@@ -1551,7 +1563,8 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         Test _random_blocks when the requested pool isn't in IPPools.
         """
 
-        def m_get_ip_pools(_self, version):
+        def m_get_ip_pools(_self, version, ipam):
+            assert ipam
             return [IPPool("10.11.0.0/16"),
                     IPPool("192.168.0.0/16")]
 
@@ -1564,7 +1577,8 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         """
         Test _random_blocks() when restricted to a single pool.
         """
-        def m_get_ip_pools(_self, version):
+        def m_get_ip_pools(_self, version, ipam):
+            assert ipam
             return [IPPool("10.45.0.0/16"),
                     IPPool("10.11.0.0/16")]
 
