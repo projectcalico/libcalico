@@ -15,6 +15,7 @@
 from etcd import EtcdKeyNotFound, EtcdAlreadyExist, EtcdCompareFailed
 
 from netaddr import IPAddress, IPNetwork
+from netaddr.core import AddrFormatError
 import socket
 import logging
 import random
@@ -95,10 +96,18 @@ class BlockHandleReaderWriter(DatastoreClient):
         Get the blocks for which this host has affinity.
 
         :param host: The host name to get affinity for.
+        :type host: string
         :param version: 4 for IPv4, 6 for IPv6.
+        :type version: int
         :param pool: Limit blocks to a specific pool, or pass None to find all
         blocks for the specified version.
+        :type pool: IPPool
+        :return: A list of blocks with affinity to host
+        :rtype: list of IPNetworks
         """
+        # Validate before datastore request
+        assert isinstance(pool, IPPool) or None
+
         # Construct the path
         path = IPAM_HOST_AFFINITY_PATH % {"hostname": host,
                                           "version": version}
@@ -117,8 +126,35 @@ class BlockHandleReaderWriter(DatastoreClient):
 
         # If pool specified, filter to only include ones in the pool.
         if pool is not None:
-            assert isinstance(pool, IPPool)
             block_ids = [cidr for cidr in block_ids if cidr in pool]
+
+        return block_ids
+
+    def _get_all_blocks(self, cidr):
+        """
+        Get all blocks that are contained with a particular CIDR.
+
+        :param cidr: The IP Network whose blocks you need.
+        :type cidr: IPNetwork
+        :return: All blocks that lie within the given CIDR.
+        :rtype: list of IPNetworks
+        """
+        path = IPAM_BLOCK_PATH.format(version=cidr.version)
+
+        block_ids = []
+        try:
+            result = self.etcd_client.read(path).children or []
+        except EtcdKeyNotFound:
+            pass
+
+        for child in result:
+            block_id = child.key.split("/")[-1]
+            try:
+                block_ids.append(IPNetwork(block_id.replace("-", "/")))
+            except AddrFormatError:
+                pass
+
+        block_ids = [block_id for block_id in block_ids if block_id in cidr]
 
         return block_ids
 
@@ -803,8 +839,10 @@ class IPAMClient(BlockHandleReaderWriter):
         Return the attributes of a given address.
 
         :param address: IPAddress to query.
+        :type address: IPAddress
         :return: The attributes for the address as passed to auto_assign() or
         assign().
+        :rtype: dictionary
         """
         assert isinstance(address, IPAddress)
         block_cidr = get_block_cidr_for_address(address)
@@ -818,6 +856,56 @@ class IPAMClient(BlockHandleReaderWriter):
         else:
             _, attributes = block.get_attributes_for_ip(address)
             return attributes
+
+    def get_cidr_assignment_attributes(self, cidr):
+        """
+        Return the attributes of a given CIDR. Depending on the size of the
+        CIDR in question, this could have a very large result.
+
+        :param cidr: CIDR to query.
+        :type cidr: IPNetwork
+        :return: The attributes of all the addresses in a given CIDR.
+        :rtype: list
+        """
+        assert isinstance(cidr, IPNetwork)
+
+        # List of IPNetworks corresponding to blocks in ETCD
+        block_cidrs = self._get_all_blocks(cidr)
+
+        # List of AllocationBlocks
+        blocks = []
+        for block_cidr in block_cidrs:
+            block = self._read_block(block_cidr)
+            blocks.append(block)
+
+        # List of IPPools
+        pools = self.get_ip_pools(cidr.version)
+
+        result = []
+        for block in blocks:
+            for pool_candidate in pools:
+                if block in pool_candidate:
+                    pool = str(pool_candidate)
+                    break
+
+            for num, index in enumerate(block.allocations):
+                ip_int = block.first + num
+                if cidr.first <= ip_int <= cidr.last:
+                    ip_attrs = {}
+                    ip_attrs["POOL"] = pool
+                    if index is None:
+                        ip_attrs["ALLOCATED"] = False
+                        ip_attrs["ATTRIBUTES"] = {}
+                        ip_attrs["HANDLE"] = None
+                    else:
+                        attributes = block.attributes[index]
+                        ip_attrs["ATTRIBUTES"] = attributes["secondary"]
+                        ip_attrs["HANDLE"] = attributes["handle_id"]
+                        ip_attrs["IP"] = str(IPAddress(ip_int))
+                    result.append(ip_attrs)
+
+        return result
+
 
     def assign_address(self, pool, address):
         """
