@@ -167,12 +167,29 @@ class TestRule(unittest.TestCase):
         """
         _ = Rule(action="deny", dst_nets="192.168.13.0/24")
 
-    @raises(ValueError)
-    def test_wrong_value(self):
+    @parameterized.expand([
+        ({"action": "accept"}, True),
+        ({"action": "deny"}, False),
+        ({"protocol": "ftp"}, True),
+        ({"protocol": None}, False),
+        ({"src_tag": "ca$h"}, True),
+        ({"dst_tag": "!nvalid"}, True),
+        ({"src_ports": [-5, 6]}, True),
+        ({"src_ports": [-5, "6:55"]}, True),
+        ({"dst_ports": [65536]}, True),
+        ({"dst_ports": [2, "-9:7"]}, True),
+        ({"dst_ports": ["5:8"]}, False),
+        ({"icmp_type": 300}, True),
+        ({"icmp_type": 33}, False)
+    ])
+    def test_values(self, arg, raisesException):
         """
         Test that instantiating a Rule with action not allow|deny will fail.
         """
-        _ = Rule(action="accept")
+        if raisesException:
+            self.assertRaises(ValueError, Rule, **arg)
+        else:
+            _ = Rule(**arg)
 
     def test_pprint(self):
         """

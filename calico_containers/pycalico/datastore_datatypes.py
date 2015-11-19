@@ -22,7 +22,8 @@ from pycalico import netns
 
 from netaddr import IPAddress, IPNetwork
 
-from pycalico.util import generate_cali_interface_name
+from pycalico.util import generate_cali_interface_name, validate_characters, \
+    validate_ports, validate_icmp_type
 
 
 IF_PREFIX = "cali"
@@ -406,6 +407,15 @@ class Rule(dict):
             value = IPNetwork(value)
         if key == "action" and value not in ("allow", "deny"):
             raise ValueError("'%s' is not allowed for key 'action'" % value)
+        if key == "protocol" and value not in ("tcp", "udp", "icmp", None):
+            raise ValueError("'%s' is not allowed for key 'protocol'" % value)
+        if key in ("src_tag", "dst_tag") and not validate_characters(value):
+            raise ValueError("'%s' is not allowed for key '%s'" % (value, key))
+        if key in ("src_ports", "dst_ports") and not validate_ports(value):
+            raise ValueError("'%s' is not allowed for key '%s'" % (value, key))
+        if key in ("icmp_type", "icmp_code") and not validate_icmp_type(value):
+            raise ValueError("'%s' is not allowed for key '%s'" % (value, key))
+
         super(Rule, self).__setitem__(key, value)
 
     def to_json(self):

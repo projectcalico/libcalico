@@ -15,7 +15,8 @@
 import unittest
 from mock import patch
 from subprocess import CalledProcessError, check_output
-from pycalico.util import get_host_ips
+from pycalico.util import get_host_ips, validate_characters, validate_ports, validate_icmp_type
+from nose_parameterized import parameterized
 
 MOCK_IP_ADDR = \
 """
@@ -177,3 +178,61 @@ class TestUtil(unittest.TestCase):
         m_check_output.side_effect = CalledProcessError(returncode=1, cmd=check_output(["ip", "-4", "addr"]))
         with self.assertRaises(SystemExit):
             addrs = get_host_ips(version=4)
+
+    @parameterized.expand([
+        ([2, 5, '114'], True),
+        (['89:133', 19], True),
+        ([15, 66, -144], False),
+        (['-1:5'], False),
+        (['15:77:66'], False),
+        (['one', 'two'], False)
+    ])
+    def test_validate_ports(self, input_list, expected_result):
+        """
+        Test validate_ports function
+        """
+        test_result = validate_ports(input_list)
+        self.assertEqual(expected_result, test_result)
+
+    @parameterized.expand([
+        (300, False),
+        (15, True),
+        (255, False),
+        (-7, False),
+        ('one', False),
+        ('43', True)
+    ])
+    def test_validate_icmp_type(self, input_list, expected_result):
+        """
+        Test validate_icmp_type function
+        """
+        test_result = validate_icmp_type(input_list)
+        self.assertEqual(expected_result, test_result)
+
+    @parameterized.expand([
+        ('abcdefghijklmnopqrstuvwxyz', True),
+        ('0123456789', True),
+        ('profile_1', True),
+        ('profile-1', True),
+        ('profile 1', False),
+        ('profile.1', True),
+        ('!', False),
+        ('@', False),
+        ('#', False),
+        ('$', False),
+        ('%', False),
+        ('^', False),
+        ('&', False),
+        ('*', False),
+        ('()', False)
+    ])
+    def test_validate_characters(self, input_string, expected_result):
+        """
+        Test validate_characters function
+        """
+        with patch('sys.exit', autospec=True) as m_sys_exit:
+            # Call method under test
+            test_result = validate_characters(input_string)
+
+            # Assert expected result
+            self.assertEqual(expected_result, test_result)
