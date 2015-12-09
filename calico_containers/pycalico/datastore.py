@@ -97,7 +97,7 @@ IP_IN_IP_ENABLED = "true"
 
 # IPAM paths
 IPAM_V_PATH = "/calico/ipam/v2/"
-IPAM_HOST_PATH = IPAM_V_PATH + "host/%(hostname)s/"
+IPAM_HOST_PATH = IPAM_V_PATH + "host/%(host)s/"
 IPAM_HOST_AFFINITY_PATH = IPAM_HOST_PATH + "ipv%(version)d/block/"
 IPAM_BLOCK_PATH = IPAM_V_PATH + "assignment/ipv%(version)d/block/"
 IPAM_HANDLE_PATH = IPAM_V_PATH + "handle/"
@@ -192,7 +192,7 @@ class DatastoreClient(object):
         # watch appropriate directory trees).
         host = get_hostname()
         for version in (4, 6):
-            path = IPAM_HOST_AFFINITY_PATH % {"hostname": host,
+            path = IPAM_HOST_AFFINITY_PATH % {"host": host,
                                               "version": version}
             try:
                 self.etcd_client.write(path, None, dir=True)

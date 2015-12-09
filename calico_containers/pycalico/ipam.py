@@ -15,7 +15,6 @@
 from etcd import EtcdKeyNotFound, EtcdAlreadyExist, EtcdCompareFailed
 
 from netaddr import IPAddress, IPNetwork
-import socket
 import logging
 import random
 
@@ -94,13 +93,13 @@ class BlockHandleReaderWriter(DatastoreClient):
         """
         Get the blocks for which this host has affinity.
 
-        :param host: The host name to get affinity for.
+        :param host: The host ID to get affinity for.
         :param version: 4 for IPv4, 6 for IPv6.
         :param pool: Limit blocks to a specific pool, or pass None to find all
         blocks for the specified version.
         """
         # Construct the path
-        path = IPAM_HOST_AFFINITY_PATH % {"hostname": host,
+        path = IPAM_HOST_AFFINITY_PATH % {"host": host,
                                           "version": version}
         block_ids = []
         try:
@@ -126,7 +125,7 @@ class BlockHandleReaderWriter(DatastoreClient):
         """
         Create and register a new affine block for the host.
 
-        :param host: The host name to get a block for.
+        :param host: The host ID to get a block for.
         :param version: 4 for IPv4, 6 for IPv6.
         :param pool: Limit blocks to a specific pool, or pass None to find all
         blocks for the specified version.
@@ -166,7 +165,7 @@ class BlockHandleReaderWriter(DatastoreClient):
         Claim a block we think is free.
         """
         block_id = str(block_cidr)
-        path = IPAM_HOST_AFFINITY_PATH % {"hostname": host,
+        path = IPAM_HOST_AFFINITY_PATH % {"host": host,
                                           "version": block_cidr.version}
         key = path + block_id.replace("/", "-")
         self.etcd_client.write(key, "")
@@ -382,7 +381,7 @@ def _handle_datastore_key(handle_id):
 class IPAMClient(BlockHandleReaderWriter):
 
     def auto_assign_ips(self, num_v4, num_v6, handle_id, attributes,
-                        pool=(None, None), hostname=None):
+                        pool=(None, None), host=None):
         """
         Automatically pick and assign the given number of IPv4 and IPv6
         addresses.
@@ -395,33 +394,33 @@ class IPAMClient(BlockHandleReaderWriter):
         :param attributes: Contents of this dict will be stored with the
         assignment and can be queried using get_assignment_attributes().  Must
         be JSON serializable.
-        :param pool: (optional) tuple of (v4 pool, v6 pool); if supplied, the
+        :param pool: (optional) Tuple of (v4 pool, v6 pool); if supplied, the
         pool(s) to assign from,  If None, automatically choose a pool.
-        :param hostname: (optional) the hostname to use for affinity in
-        assigning IP addresses.  Defaults to the hostname returned by get_hostname().
+        :param host: (optional) The host ID to use for affinity in assigning IP
+        addresses.  Defaults to the hostname returned by get_hostname().
         :return: A tuple of (v4_address_list, v6_address_list).  When IPs in
         configured pools are at or near exhaustion, this method may return
         fewer than requested addresses.
         """
         assert isinstance(handle_id, str) or handle_id is None
 
-        if not hostname:
-            hostname = get_hostname()
+        if not host:
+            host = get_hostname()
 
         _log.info("Auto-assign %d IPv4, %d IPv6 addrs",
                   num_v4, num_v6)
         v4_address_list = self._auto_assign(4, num_v4, handle_id, attributes,
-                                            pool[0], hostname)
+                                            pool[0], host)
         _log.info("Auto-assigned IPv4s %s",
                   [str(addr) for addr in v4_address_list])
         v6_address_list = self._auto_assign(6, num_v6, handle_id, attributes,
-                                            pool[1], hostname)
+                                            pool[1], host)
         _log.info("Auto-assigned IPv6s %s",
                   [str(addr) for addr in v6_address_list])
         return v4_address_list, v6_address_list
 
     def _auto_assign(self, ip_version, num, handle_id,
-                     attributes, pool, hostname):
+                     attributes, pool, host):
         """
         Auto assign addresses from a specific IP version.
 
@@ -441,13 +440,12 @@ class IPAMClient(BlockHandleReaderWriter):
         be JSON serializable.
         :param pool: (optional) if supplied, the pool to assign from,  If None,
         automatically choose a pool.
-        :param hostname: The hostname to use for affinity in assigning IP
-        addresses.
+        :param host: The host ID to use for affinity in assigning IP addresses.
         :return:
         """
         assert isinstance(handle_id, str) or handle_id is None
 
-        block_list = self._get_affine_blocks(hostname,
+        block_list = self._get_affine_blocks(host,
                                              ip_version,
                                              pool)
         block_ids = list(block_list)
@@ -460,13 +458,14 @@ class IPAMClient(BlockHandleReaderWriter):
                 block_id = block_ids.pop(0)
             except IndexError:
                 _log.info("Ran out of affine blocks for %s in pool %s",
-                          hostname, pool)
+                          host, pool)
                 break
             try:
                 ips = self._auto_assign_block(block_id,
                                               num_remaining,
                                               handle_id,
-                                              attributes)
+                                              attributes,
+                                              host)
             except KeyError:
                 # In certain rare race conditions, _get_affine_blocks above
                 # can return block_ids that don't exist (due to multiple IPAM
@@ -502,18 +501,19 @@ class IPAMClient(BlockHandleReaderWriter):
         while num_remaining > 0 and retries > 0:
             retries -= 1
             try:
-                new_block = self._new_affine_block(hostname,
+                new_block = self._new_affine_block(host,
                                                    ip_version,
                                                    pool)
                 # If successful, this creates the block and registers it to us.
             except NoFreeBlocksError:
                 _log.info("Could not get new host affinity block for %s in "
-                          "pool %s", hostname, pool)
+                          "pool %s", host, pool)
                 break
             ips = self._auto_assign_block(new_block,
                                           num_remaining,
                                           handle_id,
-                                          attributes)
+                                          attributes,
+                                          host)
             allocated_ips.extend(ips)
             num_remaining = num - len(allocated_ips)
         if retries == 0:  # pragma: no cover
@@ -537,6 +537,7 @@ class IPAMClient(BlockHandleReaderWriter):
                                           num_remaining,
                                           handle_id,
                                           attributes,
+                                          host,
                                           affinity_check=False)
             allocated_ips.extend(ips)
             num_remaining = num - len(allocated_ips)
@@ -544,7 +545,7 @@ class IPAMClient(BlockHandleReaderWriter):
         return allocated_ips
 
     def _auto_assign_block(self, block_cidr, num, handle_id, attributes,
-                           affinity_check=True):
+                           host, affinity_check=True):
         """
         Automatically pick IPs from a block and commit them to the data store.
 
@@ -554,6 +555,7 @@ class IPAMClient(BlockHandleReaderWriter):
         :param attributes: Contents of this dict will be stored with the
         assignment and can be queried using get_assignment_attributes().  Must
         be JSON serializable.
+        :param host: The host ID to use for affinity in assigning IP addresses.
         :param affinity_check: True to enable checking the host has the
         affinity to the block, False to disable this check, for example, while
         randomly searching after failure to get affine block.
@@ -567,6 +569,7 @@ class IPAMClient(BlockHandleReaderWriter):
             unconfirmed_ips = block.auto_assign(num=num,
                                                 handle_id=handle_id,
                                                 attributes=attributes,
+                                                host=host,
                                                 affinity_check=affinity_check)
             if len(unconfirmed_ips) == 0:
                 _log.debug("Block %s is full.", block_cidr)
@@ -591,7 +594,7 @@ class IPAMClient(BlockHandleReaderWriter):
                 return unconfirmed_ips
         raise RuntimeError("Hit Max Retries.")
 
-    def assign_ip(self, address, handle_id, attributes, hostname=None):
+    def assign_ip(self, address, handle_id, attributes, host=None):
         """
         Assign the given address.  Throws AlreadyAssignedError if the address
         is taken.
@@ -603,15 +606,14 @@ class IPAMClient(BlockHandleReaderWriter):
         :param attributes: Contents of this dict will be stored with the
         assignment and can be queried using get_assignment_attributes().  Must
         be JSON serializable.
-        :param hostname: (optional) the hostname to use for affinity if the
-        block containing the IP address has no host affinity.  Defaults to the
-        hostname returned by get_hostname().
+        :param host: (optional) The host ID to use for affinity in assigning IP
+        addresses.  Defaults to the hostname returned by get_hostname().
         :return: None.
         """
         assert isinstance(handle_id, str) or handle_id is None
         assert isinstance(address, IPAddress)
-        if not hostname:
-            hostname = get_hostname()
+        if not host:
+            host = get_hostname()
         block_cidr = get_block_cidr_for_address(address)
 
         for _ in xrange(RETRIES):
@@ -624,8 +626,7 @@ class IPAMClient(BlockHandleReaderWriter):
                     _log.debug("Create and claim block %s.",
                                block_cidr)
                     try:
-                        self._claim_block_affinity(hostname,
-                                                   block_cidr)
+                        self._claim_block_affinity(host, block_cidr)
                     except HostAffinityClaimedError:
                         _log.debug("Someone else claimed block %s before us.",
                                    block_cidr)
@@ -818,62 +819,3 @@ class IPAMClient(BlockHandleReaderWriter):
         else:
             _, attributes = block.get_attributes_for_ip(address)
             return attributes
-
-    def assign_address(self, pool, address):
-        """
-        Deprecated in favor of assign_ip().
-
-        Attempt to assign an IPAddress in a pool.
-        Fails if the address is already assigned.
-        The directory for storing assignments in this pool must already exist.
-        :param IPPool or IPNetwork pool: The pool that the assignment is from.
-        If pool is None, get the pool from datastore
-        :param IPAddress address: The address to assign.
-        :return: True if the allocation succeeds, false otherwise. An
-        exception is thrown for any error conditions.
-        :rtype: bool
-        """
-        pool = pool or self.get_pool(address)
-        if pool is None:
-            raise PoolNotFound("IP address %s does not belong to any "
-                                 "configured pools" % address)
-
-        if isinstance(pool, IPPool):
-            pool = pool.cidr
-        assert isinstance(pool, IPNetwork)
-        assert isinstance(address, IPAddress)
-
-        try:
-            self.assign_ip(address, None, {})
-            return True
-        except AlreadyAssignedError:
-            return False
-        # Other exceptions indicate error conditions.
-
-    def unassign_address(self, pool, address):
-        """
-        Deprecated in favor of release_ips()
-
-        Unassign an IP from a pool.
-        :param IPPool or IPNetwork pool: The pool that the assignment is from.
-        If the pool is None, get the pool from datastore
-        :param IPAddress address: The address to unassign.
-        :return: True if the address was unassigned, false otherwise. An
-        exception is thrown for any error conditions.
-        :rtype: bool
-        """
-        pool = pool or self.get_pool(address)
-        if pool is None:
-            raise PoolNotFound("IP address %s does not belong to any "
-                                 "configured pools" % address)
-
-        if isinstance(pool, IPPool):
-            pool = pool.cidr
-        assert isinstance(pool, IPNetwork)
-        assert isinstance(address, IPAddress)
-
-        err = self.release_ips({address})
-        if err:
-            return False
-        else:
-            return True
