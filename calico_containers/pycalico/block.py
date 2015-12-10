@@ -16,7 +16,6 @@ from netaddr import IPAddress, IPNetwork
 import json
 import logging
 from pycalico import PyCalicoError
-from pycalico.util import get_hostname
 
 _log = logging.getLogger(__name__)
 _log.addHandler(logging.NullHandler())
@@ -116,7 +115,7 @@ class AllocationBlock(object):
         json_dict = json.loads(etcd_result.value)
         cidr_prefix = IPNetwork(json_dict[AllocationBlock.CIDR])
 
-        # Parse out the host.  For now, it's in the form host:<hostname>
+        # Parse out the host.  For now, it's in the form host:<host id>
         affinity = json_dict[AllocationBlock.AFFINITY]
         assert affinity[:5] == "host:"
         host_affinity = affinity[5:]
@@ -145,7 +144,8 @@ class AllocationBlock(object):
         self.db_result.value = self.to_json()
         return self.db_result
 
-    def auto_assign(self, num, handle_id, attributes, affinity_check=True):
+    def auto_assign(self, num, handle_id, attributes, host,
+                    affinity_check=True):
         """
         Automatically pick and assign the given number of IP addresses.
 
@@ -156,17 +156,19 @@ class AllocationBlock(object):
         :param attributes: Contents of this dict will be stored with the
         assignment and can be queried using get_assignment_attributes().  Must
         be JSON serializable.
-        :param affinity_check: If true, verify that this block's affinity is
-        this host and throw a NoHostAffinityWarning if it isn't.  Set to false
-        to disable this check.
+        :param host: The host ID to use for affinity in when assigning IP
+        addresses.
+        :param affinity_check: If true, verify that this block's affinity
+        matches the supplied host and throw a NoHostAffinityWarning if it
+        doesn't.  Set to false to disable this check.
         :return: List of assigned addresses.  When the block is at or near
         full, this method may return fewer than requested IPs.
         """
         assert num >= 0
 
-        if affinity_check and get_hostname() != self.host_affinity:
-            raise NoHostAffinityWarning("Host affinity is %s" %
-                                        self.host_affinity)
+        if affinity_check and host != self.host_affinity:
+            raise NoHostAffinityWarning("Block host affinity is %s (not %s)" %
+                                        (self.host_affinity, host))
 
         ordinals = []
         # Walk the allocations until we find enough.
