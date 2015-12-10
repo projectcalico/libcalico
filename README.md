@@ -16,3 +16,4 @@ To run tests for libcalico:
 2. At the root of the libcalico directory, run:
 
         make test
+[![Analytics](https://ga-beacon.appspot.com/UA-52125893-3/libcalico/README.md?pixel)](https://github.com/igrigorik/ga-beacon)
