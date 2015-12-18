@@ -53,6 +53,7 @@ class AllocationBlock(object):
     AFFINITY = "affinity"
     HOST_AFFINITY_T = "host:%s"
     ALLOCATIONS = "allocations"
+    UNALLOCATED = "unallocated"
     ATTRIBUTES = "attributes"
     ATTR_HANDLE_ID = "handle_id"
     ATTR_SECONDARY = "secondary"
@@ -84,6 +85,18 @@ class AllocationBlock(object):
         attributes assigned to the allocation.
         """
 
+        self.unallocated = list(range(BLOCK_SIZE))
+        """
+        An array of unallocated addresses, with most recently de-allocated
+        addresses at the end of the list.  Each entry contains an address
+        ordinal (that is the index into the CIDR for the actual IP address.
+
+        When auto-assigning addresses, addresses are preferentially chosen
+        from the start of the list so that addresses are not re-used
+        automatically after de-allocation, except when there are no other
+        free addresses.
+        """
+
         self.attributes = []
         """
         List of dictionaries of attributes for allocations.
@@ -104,7 +117,8 @@ class AllocationBlock(object):
                      AllocationBlock.AFFINITY:
                          AllocationBlock.HOST_AFFINITY_T % self.host_affinity,
                      AllocationBlock.ALLOCATIONS: self.allocations,
-                     AllocationBlock.ATTRIBUTES: self.attributes}
+                     AllocationBlock.ATTRIBUTES: self.attributes,
+                     AllocationBlock.UNALLOCATED: self.unallocated}
         return json.dumps(json_dict)
 
     @classmethod
@@ -132,6 +146,15 @@ class AllocationBlock(object):
         attributes = json_dict[AllocationBlock.ATTRIBUTES]
         block.attributes = attributes
         assert (block._verify_attributes())
+
+        # Process unallocated addresses.  If this does not exist, assign based
+        # on the unallocated entries.
+        unallocated = json_dict.get(AllocationBlock.UNALLOCATED)
+        if unallocated is None:
+            unallocated = [o for o in range(BLOCK_SIZE)
+                                 if allocations[o] is None]
+        block.unallocated = unallocated
+        assert (block._verify_unallocated())
 
         return block
 
@@ -172,11 +195,10 @@ class AllocationBlock(object):
 
         ordinals = []
         # Walk the allocations until we find enough.
-        for o in xrange(BLOCK_SIZE):
-            if len(ordinals) == num:
-                break
-            if self.allocations[o] is None:
-                ordinals.append(o)
+        while self.unallocated and len(ordinals) < num:
+            o = self.unallocated.pop(0)
+            assert self.allocations[o] is None
+            ordinals.append(o)
 
         ips = []
         if ordinals:
@@ -185,7 +207,6 @@ class AllocationBlock(object):
 
             # Perform the allocation.
             for o in ordinals:
-                assert self.allocations[o] is None
                 self.allocations[o] = attr_index
 
                 # Convert ordinal to IP.
@@ -220,6 +241,7 @@ class AllocationBlock(object):
         # Set up attributes
         attr_index = self._find_or_add_attrs(handle_id, attributes)
         self.allocations[ordinal] = attr_index
+        self.unallocated.remove(ordinal)
         return
 
     def count_free_addresses(self):
@@ -227,11 +249,9 @@ class AllocationBlock(object):
         Count the number of free addresses in this block.
         :return: Number of free addresses.
         """
-        count = 0
-        for a in self.allocations:
-            if a is None:
-                count += 1
-        return count
+        # Simply return the length of the unallocated list since we have
+        # an entry for each free address.
+        return len(self.unallocated)
 
     def release(self, addresses):
         """
@@ -292,6 +312,7 @@ class AllocationBlock(object):
         # addressses.
         for ordinal in ordinals:
             self.allocations[ordinal] = None
+            self.unallocated.append(ordinal)
 
         return unallocated, handles_with_counts
 
@@ -462,6 +483,27 @@ class AllocationBlock(object):
             assert assignment is None or isinstance(assignment, int)
         return True
 
+    def _verify_unallocated(self):
+        """
+        Verify the integrity of the unallocated array.
+
+        This is a debug-only function to detect errors.
+        """
+        # Check that there are no duplicate ordinals in the unallocated array.
+        ordinals = set(self.unallocated)
+        assert len(ordinals) == len(self.unallocated)
+
+        # Check each ordinal corresponds to an unassigned entry in the
+        # allocations array.
+        for ordinal in ordinals:
+            assert self.allocations[ordinal] is None
+
+        # Check that the number of free allocations is the same as the length
+        # of the unallocated array.
+        assert len(self.unallocated) == len([o for o in self.allocations
+                                                    if o is None])
+
+        return True
 
 def get_block_cidr_for_address(address):
     """
