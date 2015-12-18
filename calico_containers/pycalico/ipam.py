@@ -135,8 +135,8 @@ class BlockHandleReaderWriter(DatastoreClient):
         ip_pools = self.get_ip_pools(version, ipam=True)
         if pool is not None:
             if pool not in ip_pools:
-                raise ValueError("Requested pool %s is not configured or has"
-                                 "wrong attributes" % pool)
+                raise PoolNotFound("Requested pool %s is not configured or has"
+                                   "wrong attributes" % pool)
             # Confine search to only the one pool.
             ip_pools = [pool]
 
@@ -209,8 +209,8 @@ class BlockHandleReaderWriter(DatastoreClient):
         ip_pools = self.get_ip_pools(version, ipam=True)
         if pool is not None:
             if pool not in ip_pools:
-                raise ValueError("Requested pool %s is not configured or has"
-                                 "wrong attributes" % pool)
+                raise PoolNotFound("Requested pool %s is not configured or has"
+                                   "wrong attributes" % pool)
             # Confine search to only the one pool.
             ip_pools = [pool]
 
@@ -635,8 +635,8 @@ class IPAMClient(BlockHandleReaderWriter):
                     _log.debug("Claimed block %s", block_cidr)
                     continue
                 else:
-                    raise ValueError("%s is not in any configured pool" %
-                                     address)
+                    raise PoolNotFound("%s is not in any configured pool" %
+                                       address)
 
             # Try to assign.  Throws exception if already assigned -- let it.
             block.assign(address, handle_id, attributes)
