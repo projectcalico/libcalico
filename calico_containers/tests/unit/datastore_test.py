@@ -40,6 +40,7 @@ TEST_CONT_ID = "1234"
 TEST_ENDPOINT_ID = "1234567890ab"
 TEST_ENDPOINT_ID2 = "90abcdef1234"
 TEST_HOST_PATH = CALICO_V_PATH + "/host/TEST_HOST"
+TEST_HOST_IPV4_PATH = TEST_HOST_PATH + "/bird_ip"
 IPV4_POOLS_PATH = CALICO_V_PATH + "/ipam/v4/pool/"
 IPV6_POOLS_PATH = CALICO_V_PATH + "/ipam/v6/pool/"
 TEST_PROFILE_PATH = CALICO_V_PATH + "/policy/profile/TEST/"
@@ -57,15 +58,15 @@ CONFIG_PATH = CALICO_V_PATH + "/config/"
 
 BGP_V_PATH = "/calico/bgp/v1"
 BGP_GLOBAL_PATH = BGP_V_PATH + "/global"
-TEST_BGP_HOST_PATH = BGP_V_PATH + "/host/TEST_HOST"
 BGP_PEERS_PATH = BGP_GLOBAL_PATH + "/peer_v4/"
-TEST_NODE_BGP_PEERS_PATH = TEST_BGP_HOST_PATH + "/peer_v4/"
+BGP_HOSTS_PATH = BGP_V_PATH + "/host"
 BGP_NODE_DEF_AS_PATH = BGP_GLOBAL_PATH + "/as_num"
 BGP_NODE_MESH_PATH = BGP_GLOBAL_PATH + "/node_mesh"
-TEST_HOST_IPV4_PATH = TEST_HOST_PATH + "/bird_ip"
+TEST_BGP_HOST_PATH = BGP_HOSTS_PATH + "/TEST_HOST"
 TEST_BGP_HOST_IPV4_PATH = TEST_BGP_HOST_PATH + "/ip_addr_v4"
 TEST_BGP_HOST_IPV6_PATH = TEST_BGP_HOST_PATH + "/ip_addr_v6"
 TEST_BGP_HOST_AS_PATH = TEST_BGP_HOST_PATH + "/as_num"
+TEST_NODE_BGP_PEERS_PATH = TEST_BGP_HOST_PATH + "/peer_v4/"
 
 IPAM_V4_PATH = "/calico/ipam/v2/host/THIS_HOST/ipv4/block/"
 IPAM_V6_PATH = "/calico/ipam/v2/host/THIS_HOST/ipv6/block/"
@@ -1678,6 +1679,37 @@ class TestDatastoreClient(unittest.TestCase):
         """
         self.etcd_client.read.side_effect = EtcdKeyNotFound()
         assert_equal(self.datastore.get_default_node_as(), "64511")
+
+    def test_get_hostnames_from_ips(self):
+        """
+        Test get_hostnames_from_ips returns correct dict when matches found
+        """
+        def mock_read(path, *args, **kwargs):
+            assert_equal(path, BGP_HOSTS_PATH+"/")
+            result = Mock(spec=EtcdResult)
+            ipv4_obj = Mock(spec=EtcdResult)
+            ipv4_obj.key = TEST_BGP_HOST_IPV4_PATH
+            ipv4_obj.value = "1.2.3.4"
+            ipv6_obj = Mock(spec=EtcdResult)
+            ipv6_obj.key = TEST_BGP_HOST_IPV6_PATH
+            ipv6_obj.value = "aa:bb::ee"
+
+            result.leaves = [ipv4_obj, ipv6_obj]
+            return result
+        self.etcd_client.read = mock_read
+
+        ip_list = ["1.2.3.4", "aa:bb::ee"]
+        assert_equal(self.datastore.get_hostnames_from_ips(ip_list),
+                     {"1.2.3.4":"TEST_HOST", "aa:bb::ee":"TEST_HOST"})
+
+    def test_get_hostname_from_ips_no_hosts(self):
+        """
+        Test get_hostnames_from_ips raises a KeyError when no hosts are found.
+        """
+        self.etcd_client.read.side_effect = EtcdKeyNotFound
+
+        assert_raises(KeyError, self.datastore.get_hostnames_from_ips,
+                      ["1.2.3.4", "aa:bb::ee"])
 
     def test_get_host_bgp_ips(self):
         """

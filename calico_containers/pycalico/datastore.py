@@ -16,6 +16,7 @@ import json
 import os
 import uuid
 import etcd
+import re
 from etcd import EtcdKeyNotFound, EtcdException, EtcdNotFile, EtcdKeyError
 
 from netaddr import IPNetwork, IPAddress, AddrFormatError
@@ -72,6 +73,9 @@ BGP_HOST_IPV6_PATH = BGP_HOST_PATH + "ip_addr_v6"
 BGP_HOST_AS_PATH = BGP_HOST_PATH + "as_num"
 BGP_HOST_PEERS_PATH = BGP_HOST_PATH + "peer_v%(version)s/"
 BGP_HOST_PEER_PATH = BGP_HOST_PATH + "peer_v%(version)s/%(peer_ip)s"
+
+# Grabs hostname from etcd datastore key
+HOSTNAME_DATASTORE_RE = re.compile(BGP_HOSTS_PATH + "(.*)/ip_addr_v[46]")
 
 # Global configuration
 IP_IN_IP_PATH = CONFIG_PATH + "IpInIpEnabled"
@@ -304,6 +308,33 @@ class DatastoreClient(object):
             self.etcd_client.delete(host_path, dir=True, recursive=True)
         except EtcdKeyNotFound:
             pass
+
+    @handle_errors
+    def get_hostnames_from_ips(self, ip_list):
+        """
+        Get the hostnames that are using the given IPs as their calico node IPs.
+        :param ip_list: The list of IPs to get hostnames for.
+        :return: A dictionary of {IP:hostname} the hosts that own the given IPs.
+        """
+        try:
+            hosts = self.etcd_client.read(BGP_HOSTS_PATH, recursive=True)
+            host_ips = hosts.leaves
+        except EtcdKeyNotFound:
+            # No BGP hosts currently configured in etcd, so no host owns the IP
+            raise KeyError("No BGP host configurations found.")
+
+        ip_host_dict = {}
+
+        # Loop through key-value pairs to find IP addresses
+        for host_ip in host_ips:
+            # Check for the ipv4 or ipv6 address key values
+            host_match = HOSTNAME_DATASTORE_RE.match(host_ip.key)
+            if host_match and host_ip.value in ip_list:
+                # Pull the hostname from the datastore key string
+                hostname = host_match.group(1)
+                ip_host_dict[host_ip.value] = hostname
+
+        return ip_host_dict
 
     @handle_errors
     def get_host_bgp_ips(self, hostname):
