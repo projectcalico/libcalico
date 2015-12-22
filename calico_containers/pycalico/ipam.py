@@ -18,18 +18,19 @@ from netaddr import IPAddress, IPNetwork
 import logging
 import random
 
-from pycalico.datastore_datatypes import IPPool
-from pycalico.datastore import DatastoreClient
+from pycalico.datastore_datatypes import IPPool, IPAMConfig
+from pycalico.datastore import DatastoreClient, handle_errors
 from pycalico.datastore import (IPAM_HOST_AFFINITY_PATH,
                                 IPAM_BLOCK_PATH,
-                                IPAM_HANDLE_PATH)
+                                IPAM_HANDLE_PATH,
+                                IPAM_CONFIG_PATH)
 from pycalico.datastore_errors import DataStoreError, PoolNotFound
 from pycalico.block import (AllocationBlock,
                             get_block_cidr_for_address,
+                            validate_block_size,
                             BLOCK_PREFIXLEN,
-                            AlreadyAssignedError,
                             AddressNotAssignedError,
-                            NoHostAffinityWarning)
+                            NoHostAffinityError)
 from pycalico.handle import (AllocationHandle,
                              AddressCountTooLow)
 from pycalico.util import get_hostname
@@ -89,6 +90,17 @@ class BlockHandleReaderWriter(DatastoreClient):
             except EtcdAlreadyExist:
                 raise CASError(str(block.cidr))
 
+    def _delete_block(self, block):
+        """
+        Delete a block using an atomic delete operation.
+        """
+        try:
+            self.etcd_client.delete(
+                block.db_result.key,
+                prevIndex=block.db_result.modifiedIndex)
+        except EtcdAlreadyExist:
+            raise CASError(str(block.cidr))
+
     def _get_affine_blocks(self, host, version, pool):
         """
         Get the blocks for which this host has affinity.
@@ -121,7 +133,7 @@ class BlockHandleReaderWriter(DatastoreClient):
 
         return block_ids
 
-    def _new_affine_block(self, host, version, pool):
+    def _new_affine_block(self, host, version, pool, ipam_config):
         """
         Create and register a new affine block for the host.
 
@@ -129,6 +141,7 @@ class BlockHandleReaderWriter(DatastoreClient):
         :param version: 4 for IPv4, 6 for IPv6.
         :param pool: Limit blocks to a specific pool, or pass None to find all
         blocks for the specified version.
+        :param ipam_config: The global IPAM configuration.
         :return: The block CIDR of the new block.
         """
         # Get the pools and verify we got a valid one, or none.
@@ -150,7 +163,8 @@ class BlockHandleReaderWriter(DatastoreClient):
                 except EtcdKeyNotFound:
                     _log.debug("Found block %s free.", block_id)
                     try:
-                        self._claim_block_affinity(host, block_cidr)
+                        self._claim_block_affinity(host, block_cidr,
+                                                   ipam_config)
                     except HostAffinityClaimedError:
                         # Failed to claim the block because some other host
                         # has it.
@@ -160,18 +174,19 @@ class BlockHandleReaderWriter(DatastoreClient):
                     return block_cidr
         raise NoFreeBlocksError()
 
-    def _claim_block_affinity(self, host, block_cidr):
+    def _claim_block_affinity(self, host, block_cidr, ipam_config):
         """
         Claim a block we think is free.
+        :param host: The host ID to get a block for.
+        :param block_cidr: The block CIDR.
+        :param ipam_config: The global IPAM configuration.
         """
-        block_id = str(block_cidr)
-        path = IPAM_HOST_AFFINITY_PATH % {"host": host,
-                                          "version": block_cidr.version}
-        key = path + block_id.replace("/", "-")
+        key = _block_host_key(host, block_cidr)
         self.etcd_client.write(key, "")
 
         # Create the block.
-        block = AllocationBlock(block_cidr, host)
+        block = AllocationBlock(block_cidr, host,
+                                ipam_config.strict_host_affinity)
         try:
             self._compare_and_swap_block(block)
         except CASError:
@@ -193,12 +208,60 @@ class BlockHandleReaderWriter(DatastoreClient):
                 # no longer exists.
                 pass
 
-            # Throw a key error to let the caller know the block wasn't free
-            # after all.
+            # Throw a HostAffinityClaimedError to let the caller know the block
+            # wasn't free after all.
             raise HostAffinityClaimedError("Block %s already claimed by %s",
-                                           block_id, block.host_affinity)
+                                           block_cidr, block.host_affinity)
+
         # successfully created the block.  Done.
         return
+
+    def _release_block_affinity(self, host, block_cidr):
+        """
+        Release a block we think is owned by the specified host.
+
+        If there are no IPs assigned in the block then delete the block.  If
+        there are IPs assigned, remove affinity of the block from the host.
+
+        Raises HostAffinityNotClaimedError if the block is claimed by a
+        different host.
+        Raises KeyError if the block does not exist.
+        """
+        for _ in xrange(RETRIES):
+            block = self._read_block(block_cidr)
+            if block.host_affinity != host:
+                _log.info("Block host affinity is %s (expected %s) - not "
+                          "releasing", block.host_affinity, host)
+                raise HostAffinityClaimedByOtherError(
+                          "Block %s is claimed by %s",
+                          block_cidr, block.host_affinity)
+
+            try:
+                if block.is_empty():
+                    # The block is empty, so just delete the block.
+                    _log.debug("Block is empty - delete block")
+                    self._delete_block(block)
+                elif block.strict_host_affinity:
+                    # The block has strict host affinity, therefore it can
+                    # only contain IPs belonging to the host, so it is safe to
+                    # remove the block.
+                    _log.debug("Block only contains hosts IPs - delete block")
+                    self._delete_block(block)
+                else:
+                    block.host_affinity = None
+                    self._compare_and_swap_block(block)
+            except CASError:
+                # CAS failed.  Retry.
+                continue
+
+            # We removed or updated the block successfully, so update the host
+            # configuration to remove the CIDR.
+            _log.debug("Removed affinity for block - deleting host key.")
+            key = _block_host_key(host, block_cidr)
+            self.etcd_client.delete(key)
+            return
+
+        raise RuntimeError("Max retries hit.")  # pragma: no cover
 
     def _random_blocks(self, excluded_ids, version, pool):
         """
@@ -341,6 +404,69 @@ class BlockHandleReaderWriter(DatastoreClient):
             except EtcdAlreadyExist:
                 raise CASError(handle.handle_id)
 
+    def _read_blocks(self):
+        """
+        Read all the allocated blocks.
+        :return: Tuple of
+                 (List of IPv4 AllocationBlocks,
+                  List of IPv6 AllocationBlocks)
+        """
+        blocks = {}
+        for version in (4, 6):
+            blocks_path = IPAM_BLOCK_PATH % {"version": str(version)}
+            try:
+                leaves = self.etcd_client.read(blocks_path, recursive=True).leaves
+            except EtcdKeyNotFound:
+                # Path doesn't exist.
+                blocks[version] = []
+            else:
+                # Convert the leaf values to AllocationBlocks.  We need to
+                # handle an empty leaf value because when no pools are
+                # configured the recursive read returns the parent directory.
+                blocks[version] = [AllocationBlock.from_etcd_result(leaf) for leaf in leaves
+                                                                          if leaf.value]
+        return blocks[4], blocks[6]
+
+    @handle_errors
+    def get_ipam_config(self):
+        """
+        Return the deployment specific IPAM configuration.
+
+        :param host: The host ID of the config to return.
+        :return: An IPAMConfig object.
+        """
+        try:
+            result = self.etcd_client.read(IPAM_CONFIG_PATH)
+        except EtcdKeyNotFound:
+            _log.debug("No IPAM Config stored - return default")
+            return IPAMConfig()
+        else:
+            return IPAMConfig.from_json(result.value)
+
+    @handle_errors
+    def set_ipam_config(self, config):
+        """
+        Set the deployment-specific IPAM configuration.
+
+        The IPAM configuration may not be changed whilst there are allocation
+        blocks configured.  An IPAMConf
+
+        :param config: An IPAMConfig object.
+        """
+        assert isinstance(config, IPAMConfig)
+        current = self.get_ipam_config()
+        if current == config:
+            _log.debug("Configuration has not changed")
+            return
+
+        blocksv4, blocksv6 = self._read_blocks()
+        if blocksv4 or blocksv6:
+            _log.warning("Cannot change IPAM config while allocations exist")
+            raise IPAMConfigConflictError("Unable to change global IPAM "
+                "configuration due to existing IP allocations.")
+
+        self.etcd_client.write(IPAM_CONFIG_PATH, config.to_json())
+
 
 class CASError(DataStoreError):
     """
@@ -364,14 +490,50 @@ class HostAffinityClaimedError(DataStoreError):
     pass
 
 
+class IPAMConfigConflictError(DataStoreError):
+    """
+    Attempt to change IPAM configuration that conflict with existing
+    allocations.
+    """
+    pass
+
+
+class HostAffinityClaimedByOtherError(DataStoreError):
+    """
+    Tried to set the remove affinity of a block which has affinity claimed by
+    a different host.
+    """
+    pass
+
+
+class InvalidBlockSizeError(DataStoreError):
+    """
+    Attempting to claim or release a CIDR that is smaller than the minimum
+    block size.
+    """
+    pass
+
+
 def _block_datastore_key(block_cidr):
     """
-    Translate a block_id into a datastore key.
+    Translate a block CIDR into a datastore key.
     :param block_cidr: IPNetwork representing the block
-    :return: etcd key as string.
+    :return: etcd key as a string.
     """
     path = IPAM_BLOCK_PATH % {'version': block_cidr.version}
     return path + str(block_cidr).replace("/", "-")
+
+
+def _block_host_key(host, block_cidr):
+    """
+    Translate a block CIDR into the host block key.
+    :param block_cidr: IPNetwork representing the block
+    :return: etcd key as a string.
+    """
+    block_id = str(block_cidr)
+    path = IPAM_HOST_AFFINITY_PATH % {"host": host,
+                                      "version": block_cidr.version}
+    return path + block_id.replace("/", "-")
 
 
 def _handle_datastore_key(handle_id):
@@ -466,11 +628,11 @@ class IPAMClient(BlockHandleReaderWriter):
                           host, pool)
                 break
             try:
-                ips = self._auto_assign_block(block_id,
-                                              num_remaining,
-                                              handle_id,
-                                              attributes,
-                                              host)
+                ips = self._auto_assign_ips_in_block(block_id,
+                                                     num_remaining,
+                                                     handle_id,
+                                                     attributes,
+                                                     host)
             except KeyError:
                 # In certain rare race conditions, _get_affine_blocks above
                 # can return block_ids that don't exist (due to multiple IPAM
@@ -488,7 +650,7 @@ class IPAMClient(BlockHandleReaderWriter):
                 else:
                     _log.warning("Stopping retry of block %s.", block_id)
                 continue
-            except NoHostAffinityWarning:
+            except NoHostAffinityError:
                 # In certain rare race conditions, _get_affine_blocks above
                 # can return block_ids that don't actually have affinity to
                 # this host (due to multiple IPAM clients on this host running
@@ -500,57 +662,69 @@ class IPAMClient(BlockHandleReaderWriter):
             num_remaining = num - len(allocated_ips)
 
         # If there are still addresses to allocate, then we've run out of
-        # blocks with affinity.  Try to fullfil address request by allocating
-        # new blocks.
-        retries = RETRIES
-        while num_remaining > 0 and retries > 0:
-            retries -= 1
-            try:
-                new_block = self._new_affine_block(host,
-                                                   ip_version,
-                                                   pool)
-                # If successful, this creates the block and registers it to us.
-            except NoFreeBlocksError:
-                _log.info("Could not get new host affinity block for %s in "
-                          "pool %s", host, pool)
-                break
-            ips = self._auto_assign_block(new_block,
-                                          num_remaining,
-                                          handle_id,
-                                          attributes,
-                                          host)
-            allocated_ips.extend(ips)
-            num_remaining = num - len(allocated_ips)
-        if retries == 0:  # pragma: no cover
-            raise RuntimeError("Hit Max Retries.")
+        # blocks with affinity.  Before we can assign new blocks or assign in
+        # non-affine blocks, we need to check that our IPAM configuration
+        # allows that.
+        ipam_config = self.get_ipam_config()
+
+        # If we can auto allocate blocks, try to fulfill address request by
+        # allocating new blocks.
+        if ipam_config.auto_allocate_blocks:
+            _log.debug("Attempt to allocate new affine blocks")
+
+            retries = RETRIES
+            while num_remaining > 0 and retries > 0:
+                retries -= 1
+                try:
+                    new_block = self._new_affine_block(host,
+                                                       ip_version,
+                                                       pool,
+                                                       ipam_config)
+                    # If successful, this creates the block and registers it to
+                    # us.
+                except NoFreeBlocksError:
+                    _log.info("Could not get new host affinity block for %s in "
+                              "pool %s", host, pool)
+                    break
+                ips = self._auto_assign_ips_in_block(new_block,
+                                                     num_remaining,
+                                                     handle_id,
+                                                     attributes,
+                                                     host)
+                allocated_ips.extend(ips)
+                num_remaining = num - len(allocated_ips)
+            if retries == 0:  # pragma: no cover
+                raise RuntimeError("Hit Max Retries.")
 
         # If there are still addresses to allocate, we've now tried all blocks
         # with some affinity to us, and tried (and failed) to allocate new
-        # ones.  Our last option is a random hunt through any blocks we haven't
-        # yet tried.
-        if num_remaining > 0:
-            random_blocks = iter(self._random_blocks(block_list,
-                                                     ip_version,
-                                                     pool))
-        while num_remaining > 0:
-            try:
-                block_id = random_blocks.next()
-            except StopIteration:
-                _log.warning("All addresses exhausted in pool %s", pool)
-                break
-            ips = self._auto_assign_block(block_id,
-                                          num_remaining,
-                                          handle_id,
-                                          attributes,
-                                          host,
-                                          affinity_check=False)
-            allocated_ips.extend(ips)
-            num_remaining = num - len(allocated_ips)
+        # ones.  If we do not require strict host affinity, our last option is
+        # a random hunt through any blocks we haven't yet tried.
+        if not ipam_config.strict_host_affinity:
+            _log.debug("Attempt to allocate from non-affine random block")
+            if num_remaining > 0:
+                random_blocks = iter(self._random_blocks(block_list,
+                                                         ip_version,
+                                                         pool))
+            while num_remaining > 0:
+                try:
+                    block_id = random_blocks.next()
+                except StopIteration:
+                    _log.warning("All addresses exhausted in pool %s", pool)
+                    break
+                ips = self._auto_assign_ips_in_block(block_id,
+                                                     num_remaining,
+                                                     handle_id,
+                                                     attributes,
+                                                     host,
+                                                     affinity_check=False)
+                allocated_ips.extend(ips)
+                num_remaining = num - len(allocated_ips)
 
         return allocated_ips
 
-    def _auto_assign_block(self, block_cidr, num, handle_id, attributes,
-                           host, affinity_check=True):
+    def _auto_assign_ips_in_block(self, block_cidr, num, handle_id, attributes,
+                                  host, affinity_check=True):
         """
         Automatically pick IPs from a block and commit them to the data store.
 
@@ -571,6 +745,7 @@ class IPAMClient(BlockHandleReaderWriter):
         for i in xrange(RETRIES):
             _log.debug("Auto-assign from %s, retry %d", block_cidr, i)
             block = self._read_block(block_cidr)
+
             unconfirmed_ips = block.auto_assign(num=num,
                                                 handle_id=handle_id,
                                                 attributes=attributes,
@@ -602,7 +777,9 @@ class IPAMClient(BlockHandleReaderWriter):
     def assign_ip(self, address, handle_id, attributes, host=None):
         """
         Assign the given address.  Throws AlreadyAssignedError if the address
-        is taken.
+        is taken.  If the strict_host_affinity option is set to True, this
+        throws a NoHostAffinityError if the address is in a block owned by a
+        different host.
 
         :param address: IPAddress to assign.
         :param handle_id: allocation handle ID for this request.  You can
@@ -620,18 +797,25 @@ class IPAMClient(BlockHandleReaderWriter):
         if not host:
             host = get_hostname()
         block_cidr = get_block_cidr_for_address(address)
+        ipam_config = None
 
         for _ in xrange(RETRIES):
             try:
                 block = self._read_block(block_cidr)
             except KeyError:
                 _log.debug("Block %s doesn't exist.", block_cidr)
-                pools = self.get_ip_pools(address.version, ipam=True)
-                if any([address in pool for pool in pools]):
+                if self._validate_cidr_in_pools(block_cidr):
                     _log.debug("Create and claim block %s.",
                                block_cidr)
+
+                    # We need the IPAM config, so get it once now.
+                    if ipam_config is None:
+                        _log.debug("Querying IPAM config")
+                        ipam_config = self.get_ipam_config()
+
                     try:
-                        self._claim_block_affinity(host, block_cidr)
+                        self._claim_block_affinity(host, block_cidr,
+                                                   ipam_config)
                     except HostAffinityClaimedError:
                         _log.debug("Someone else claimed block %s before us.",
                                    block_cidr)
@@ -643,8 +827,10 @@ class IPAMClient(BlockHandleReaderWriter):
                     raise PoolNotFound("%s is not in any configured pool" %
                                        address)
 
-            # Try to assign.  Throws exception if already assigned -- let it.
-            block.assign(address, handle_id, attributes)
+            # Try to assign.  Throws exception if already assigned, or if
+            # the block requires strict host affinity and the host affinity
+            # does not match the host.
+            block.assign(address, handle_id, attributes, host)
 
             # If using a handle, increment by one IP
             if handle_id is not None:
@@ -682,11 +868,11 @@ class IPAMClient(BlockHandleReaderWriter):
 
         # loop through blocks, CAS releasing.
         for block_cidr, addresses in addrs_by_block.iteritems():
-            unalloc_block = self._release_block(block_cidr, addresses)
+            unalloc_block = self._release_ips_from_block(block_cidr, addresses)
             unallocated = unallocated.union(unalloc_block)
         return unallocated
 
-    def _release_block(self, block_cidr, addresses):
+    def _release_ips_from_block(self, block_cidr, addresses):
         """
         Release the given addresses from the block, using compare-and-swap to
         write the block.
@@ -711,7 +897,15 @@ class IPAMClient(BlockHandleReaderWriter):
                 return addresses
             # Try to commit
             try:
-                self._compare_and_swap_block(block)
+                # If the block is now empty and there is no host affinity to
+                # the block then delete the block, otherwise just update the
+                # block configuration.
+                if block.is_empty() and not block.host_affinity:
+                    _log.debug("Deleting empty non-affine block")
+                    self._delete_block(block)
+                else:
+                    _log.debug("Updating assignments in block")
+                    self._compare_and_swap_block(block)
             except CASError:
                 continue
             else:
@@ -725,6 +919,16 @@ class IPAMClient(BlockHandleReaderWriter):
                 return unallocated
 
         raise RuntimeError("Hit Max retries.")  # pragma: no cover
+
+    def _validate_cidr_in_pools(self, cidr):
+        """
+        Validate a CIDR is fully covered by one of the configured IP pools.
+        Raises a PoolNotFound exception if the CIDR is not valid.
+
+        :param cidr: (IPNetwork) The CIDR to check.
+        """
+        pools = self.get_ip_pools(cidr.version, ipam=True)
+        return any([cidr in pool for pool in pools])
 
     def get_ip_assignments_by_handle(self, handle_id):
         """
@@ -824,3 +1028,113 @@ class IPAMClient(BlockHandleReaderWriter):
         else:
             _, attributes = block.get_attributes_for_ip(address)
             return attributes
+
+    def claim_affinity(self, cidr, host=None):
+        """
+        Claim affinity for the blocks covered by the requested CIDR.
+
+        :param cidr: The CIDR covering the blocks to be released.  Raises a
+        InvalidBlockSizeError if the CIDR is smaller than the minimum allowable
+        block size.
+        :param host: (optional) The host ID to use for affinity in assigning IP
+        addresses.  Defaults to the hostname returned by get_hostname().
+
+        :return: A tuple of:
+                 ([IPNetwork<blocks claimed>],
+                  [IPNetwork<blocks that were claimed by another host>])
+        """
+        assert isinstance(cidr, IPNetwork)
+        if not validate_block_size(cidr):
+            _log.info("Requested CIDR %s is too small", cidr)
+            raise InvalidBlockSizeError("The requested CIDR is smaller than "
+                                        "the minimum block size.")
+
+        if not host:
+            host = get_hostname()
+
+        if self._validate_cidr_in_pools(cidr):
+            _log.info("Requested CIDR %s is not is a configured pool", cidr)
+            raise PoolNotFound("Requested CIDR is not in a configured IP "
+                               "Pool.")
+
+        claimed = []
+        unclaimed = []
+
+        # Get the IPAM configuration.  We need this when claiming block
+        # affinities.
+        ipam_config = self.get_ipam_config()
+
+        for block_cidr in cidr.subnet(BLOCK_PREFIXLEN[cidr.version]):
+            try:
+                self._claim_block_affinity(host, block_cidr, ipam_config)
+            except HostAffinityClaimedError:
+                unclaimed.append(cidr)
+                break
+            else:
+                claimed.append(cidr)
+
+        return claimed, unclaimed
+
+    def release_affinity(self, cidr, host=None):
+        """
+        :param cidr: The CIDR covering the blocks to be released.  Raises a
+        InvalidBlockSizeError if the CIDR is smaller than the minimum allowable
+        block size.
+        :param host: (optional) The host ID to compare against the affinity of
+        each block that is being released.
+
+        :return: A tuple of:
+                 ([IPNetwork<blocks released>],
+                  [IPNetwork<blocks that were not claimed>],
+                  [IPNetwork<blocks that were claimed by another host>])
+        """
+        assert isinstance(cidr, IPNetwork)
+        if not validate_block_size(cidr):
+            _log.info("Requested CIDR %s is too small", cidr)
+            raise InvalidBlockSizeError("The requested CIDR is smaller than "
+                                        "the minimum block size.")
+        if not host:
+            host = get_hostname()
+
+        released = []
+        not_claimed = []
+        claimed_by_other = []
+
+        for block_cidr in cidr.subnet(BLOCK_PREFIXLEN[cidr.version]):
+            try:
+                self._release_block_affinity(host, block_cidr)
+            except HostAffinityClaimedByOtherError:
+                claimed_by_other.append(cidr)
+                break
+            except KeyError:
+                not_claimed.append(block_cidr)
+                break
+            else:
+                released.append(block_cidr)
+
+            return released, not_claimed, claimed_by_other
+
+    def release_host_affinities(self, host):
+        """
+        Release host affinities, for all blocks owned by the host.
+
+        :param host: (optional) The host ID to compare against the affinity of
+        each block that is being released.
+        """
+        if not host:
+            host = get_hostname()
+
+        # Find all of the affine blocks that are listed for the host, and
+        # release affinity for each.  Note that the host may over-estimate
+        # which blocks it has affinity for so ignore any error indicating that
+        # the block is owned by another host - we simply won't release that
+        # block.
+        _log.debug("Releasing affinities for %s", host)
+        for version in (4, 6):
+            cidrs = self._get_affine_blocks(host, version, None)
+            for cidr in cidrs:
+                try:
+                    self._release_block_affinity(host, cidr)
+                except HostAffinityClaimedByOtherError:
+                    _log.info("Affine block %s is not owned by host %s - skip",
+                              cidr, host)

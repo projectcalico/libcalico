@@ -22,7 +22,7 @@ from etcd import EtcdKeyNotFound, EtcdException, EtcdNotFile, EtcdKeyError
 from netaddr import IPNetwork, IPAddress, AddrFormatError
 
 from pycalico.datastore_datatypes import Rules, BGPPeer, IPPool, \
-    Endpoint, Profile, Rule, IF_PREFIX
+    Endpoint, Profile, Rule, IF_PREFIX, IPAMConfig
 from pycalico.datastore_errors import DataStoreError, \
     ProfileNotInEndpoint, ProfileAlreadyInEndpoint, MultipleEndpointsMatch
 from pycalico.util import get_hostname
@@ -103,6 +103,7 @@ IP_IN_IP_ENABLED = "true"
 
 # IPAM paths
 IPAM_V_PATH = "/calico/ipam/v2/"
+IPAM_CONFIG_PATH = IPAM_V_PATH + "config"
 IPAM_HOST_PATH = IPAM_V_PATH + "host/%(host)s/"
 IPAM_HOST_AFFINITY_PATH = IPAM_HOST_PATH + "ipv%(version)d/block/"
 IPAM_BLOCK_PATH = IPAM_V_PATH + "assignment/ipv%(version)d/block/"
@@ -1128,9 +1129,7 @@ class DatastoreClient(object):
     @handle_errors
     def set_default_node_as(self, as_num):
         """
-        Return the default node BGP AS Number
-
-        :return: The default node BGP AS Number.
+        Set the default node BGP AS Number
         """
         self.etcd_client.write(BGP_NODE_DEF_AS_PATH, str(as_num))
 

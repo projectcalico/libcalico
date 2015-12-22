@@ -1,4 +1,5 @@
 # Copyright 2015 Metaswitch Networks
+# Copyright 2015 Metaswitch Networks
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,11 +22,13 @@ from etcd import EtcdResult, Client, EtcdAlreadyExist, EtcdKeyNotFound, EtcdComp
 
 from pycalico.ipam import (IPAMClient, BlockHandleReaderWriter,
                            CASError, NoFreeBlocksError, _block_datastore_key,
-                           _handle_datastore_key, HostAffinityClaimedError)
+                           _handle_datastore_key, HostAffinityClaimedError,
+                           IPAMConfigConflictError)
 from pycalico.datastore_errors import PoolNotFound
 from pycalico.block import AllocationBlock, AddressNotAssignedError, BLOCK_SIZE
 from pycalico.handle import AllocationHandle, AddressCountTooLow
-from pycalico.datastore_datatypes import IPPool
+from pycalico.datastore import IPAM_CONFIG_PATH
+from pycalico.datastore_datatypes import IPPool, IPAMConfig
 from block_test import (_test_block_empty_v4, _test_block_empty_v6,
                         BLOCK_V6_1, BLOCK_V4_1)
 
@@ -40,6 +43,10 @@ class TestIPAMClient(unittest.TestCase):
         self.client = IPAMClient()
         self.m_etcd_client = Mock(spec=Client)
         self.client.etcd_client = self.m_etcd_client
+
+        # The majority of tests use the default IPAM configuration, so mock
+        # out the get_ipam_config() method,
+        self.client.get_ipam_config = Mock(return_value=IPAMConfig())
 
     @patch("pycalico.ipam.get_hostname", return_value=TEST_HOST)
     def test_auto_assign(self, m_get_hostname):
@@ -343,7 +350,7 @@ class TestIPAMClient(unittest.TestCase):
             return [IPPool("192.168.0.0/16")]
 
         # Reads on 1, 4
-        block = AllocationBlock(IPNetwork("192.168.0.0/26"), "test_host1")
+        block = AllocationBlock(IPNetwork("192.168.0.0/26"), "test_host1", False)
         m_result = Mock(spec=EtcdResult)
         m_result.value = block.to_json()
         self.m_etcd_client.read.side_effect = [EtcdKeyNotFound(), m_result]
@@ -378,11 +385,11 @@ class TestIPAMClient(unittest.TestCase):
         def m_read_block(self, block_cidr):
             if block_cidr in affine_blocks:
                 # All our blocks are full.
-                block = AllocationBlock(block_cidr, "test_host1")
+                block = AllocationBlock(block_cidr, "test_host1", False)
                 block.auto_assign(256, None, {}, TEST_HOST)
             else:
                 # Other blocks are not.
-                block = AllocationBlock(block_cidr, "test_host2")
+                block = AllocationBlock(block_cidr, "test_host2", False)
                 rando_blocks.add(block)
             return block
 
@@ -442,7 +449,7 @@ class TestIPAMClient(unittest.TestCase):
            IPAM_HOST_AFFINITY_PATH.
         5. Client B attempts to read the block, but when it tries to auto
            assign from the block, it fails because a different host has
-           affinity.  This throws a NoHostAffinityWarning.
+           affinity.  This throws a NoHostAffinityError.
 
         """
 
@@ -459,11 +466,11 @@ class TestIPAMClient(unittest.TestCase):
                 raise KeyError()
             elif block_cidr is BLOCK_V4_2:
                 # This block exists, but we don't have host affinity to it.
-                block = AllocationBlock(BLOCK_V4_2, "test_host2")
+                block = AllocationBlock(BLOCK_V4_2, "test_host2", False)
             elif block_cidr is BLOCK_V4_3:
                 # This block exists and we have host affinity.  Allocated IPs
                 # should come from this block.
-                block = AllocationBlock(BLOCK_V4_3, "test_host1")
+                block = AllocationBlock(BLOCK_V4_3, "test_host1", False)
             else:
                 # Success on BLOCK_V4_3, so no additional blocks should be
                 # read.
@@ -500,7 +507,7 @@ class TestIPAMClient(unittest.TestCase):
         # 4 attempts to read BLOCK_V4_1, then one attempt to read
         # first_free_block
         first_free_block = IPNetwork("10.11.0.0/26")
-        block = AllocationBlock(first_free_block, "test_host1")
+        block = AllocationBlock(first_free_block, "test_host1", False)
         m_read_block = Mock()
         m_read_block.side_effect = [KeyError(),
                                     KeyError(),
@@ -670,7 +677,7 @@ class TestIPAMClient(unittest.TestCase):
             return [IPPool("10.11.0.0/16"), IPPool("192.168.0.0/16")]
 
         # 1st read, doesn't exist.  2nd read, does exist, empty.
-        block = AllocationBlock(BLOCK_V4_1, "test_host1")
+        block = AllocationBlock(BLOCK_V4_1, "test_host1", False)
         m_result0 = Mock(spec=EtcdResult)
         m_result0.value = block.to_json()
         self.m_etcd_client.read.side_effect = [EtcdKeyNotFound(), m_result0]
@@ -715,7 +722,7 @@ class TestIPAMClient(unittest.TestCase):
 
         # 2nd read.
         block = _test_block_empty_v4()
-        block.assign(IPAddress("10.11.12.56"), None, {})
+        block.assign(IPAddress("10.11.12.56"), None, {}, TEST_HOST)
         m_result1 = Mock(spec=EtcdResult)
         m_result1.value = block.to_json()
 
@@ -770,12 +777,12 @@ class TestIPAMClient(unittest.TestCase):
         m_result6 = Mock(spec=EtcdResult)
         def m_read_block(self, block_cidr):
             block4 = _test_block_empty_v4()
-            block4.assign(ip4, None, {})
+            block4.assign(ip4, None, {}, TEST_HOST)
             block4.db_result = m_result4
             if block_cidr == block4.cidr:
                 return block4
             block6 = _test_block_empty_v6()
-            block6.assign(ip6, None, {})
+            block6.assign(ip6, None, {}, TEST_HOST)
             block6.db_result = m_result6
             if block_cidr == block6.cidr:
                 return block6
@@ -828,7 +835,7 @@ class TestIPAMClient(unittest.TestCase):
             if block_cidr == IPNetwork("10.11.12/26"):
                 raise KeyError
             block6 = _test_block_empty_v6()
-            block6.assign(ip6, None, {})
+            block6.assign(ip6, None, {}, TEST_HOST)
             block6.db_result = m_result6
             if block_cidr == block6.cidr:
                 return block6
@@ -856,13 +863,13 @@ class TestIPAMClient(unittest.TestCase):
         def m_read_block(self, block_cidr):
             block4 = _test_block_empty_v4()
             for ip4 in ip4s:
-                block4.assign(ip4, None, {})
+                block4.assign(ip4, None, {}, TEST_HOST)
             block4.db_result = m_result4
             if block_cidr == block4.cidr:
                 return block4
             block6 = _test_block_empty_v6()
             for ip6 in ip6s:
-                block6.assign(ip6, None, {})
+                block6.assign(ip6, None, {}, TEST_HOST)
             block6.db_result = m_result6
             if block_cidr == block6.cidr:
                 return block6
@@ -895,12 +902,12 @@ class TestIPAMClient(unittest.TestCase):
 
         def m_read_block(self, block_cidr):
             block4 = _test_block_empty_v4()
-            block4.assign(ip4, None, {})
+            block4.assign(ip4, None, {}, TEST_HOST)
             block4.db_result = m_result4
             if block_cidr == block4.cidr:
                 return block4
             block6 = _test_block_empty_v6()
-            block6.assign(ip6, None, {})
+            block6.assign(ip6, None, {}, TEST_HOST)
             block6.db_result = m_result6
             if block_cidr == block6.cidr:
                 return block6
@@ -944,11 +951,11 @@ class TestIPAMClient(unittest.TestCase):
         m_resultb4 = Mock(spec=EtcdResult)
         m_resultb6 = Mock(spec=EtcdResult)
         block4 = _test_block_empty_v4()
-        block4.assign(ip4, handle_id, {})
+        block4.assign(ip4, handle_id, {}, TEST_HOST)
         block4.db_result = m_resultb4
         m_resultb4.key = "fake/ipv4key"
         block6 = _test_block_empty_v6()
-        block6.assign(ip6, handle_id, {})
+        block6.assign(ip6, handle_id, {}, TEST_HOST)
         block6.db_result = m_resultb6
         m_resultb6.key = "fake/ipv6key"
 
@@ -999,11 +1006,11 @@ class TestIPAMClient(unittest.TestCase):
         m_resultb4 = Mock(spec=EtcdResult)
         m_resultb6 = Mock(spec=EtcdResult)
         block4 = _test_block_empty_v4()
-        block4.assign(ip4, handle_id, {})
+        block4.assign(ip4, handle_id, {}, TEST_HOST)
         m_resultb4.key = _block_datastore_key(cidr4)
         m_resultb4.value = block4.to_json()
         block6 = _test_block_empty_v6()
-        block6.assign(ip6, handle_id, {})
+        block6.assign(ip6, handle_id, {}, TEST_HOST)
         m_resultb6.key = _block_datastore_key(cidr6)
         m_resultb6.value = block6.to_json()
 
@@ -1097,7 +1104,7 @@ class TestIPAMClient(unittest.TestCase):
 
         m_resultb4 = Mock(spec=EtcdResult)
         block4 = _test_block_empty_v4()
-        block4.assign(ip4, None, {})
+        block4.assign(ip4, None, {}, TEST_HOST)
         m_resultb4.key = _block_datastore_key(cidr4)
         m_resultb4.value = block4.to_json()
 
@@ -1133,9 +1140,9 @@ class TestIPAMClient(unittest.TestCase):
         handle_id0 = "handle_id_1"
 
         block4 = _test_block_empty_v4()
-        block4.assign(ip4, handle_id0, {})
+        block4.assign(ip4, handle_id0, {}, TEST_HOST)
         block6 = _test_block_empty_v6()
-        block6.assign(ip6, handle_id0, {})
+        block6.assign(ip6, handle_id0, {}, TEST_HOST)
 
         def m_read_block(_self, block_cidr):
             if block_cidr == block4.cidr:
@@ -1182,9 +1189,9 @@ class TestIPAMClient(unittest.TestCase):
         attr6 = {"ccd": "ddd"}
 
         block4 = _test_block_empty_v4()
-        block4.assign(ip4, handle_id4, attr4)
+        block4.assign(ip4, handle_id4, attr4, TEST_HOST)
         block6 = _test_block_empty_v6()
-        block6.assign(ip6, handle_id6, attr6)
+        block6.assign(ip6, handle_id6, attr6, TEST_HOST)
 
         def m_read_block(_self, block_cidr):
             if block_cidr == block4.cidr:
@@ -1312,7 +1319,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         self.m_etcd_client.write.side_effect = [None, EtcdAlreadyExist()]
 
         self.client._claim_block_affinity(block.host_affinity,
-                                          block.cidr)
+                                          block.cidr, IPAMConfig())
 
         key = _block_datastore_key(block.cidr)
         value = block.to_json()
@@ -1340,7 +1347,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         m_result0 = Mock(spec=EtcdResult)
         m_result0.value = block.to_json()
 
-        block_our_host = AllocationBlock(BLOCK_V4_1, "test_host2")
+        block_our_host = AllocationBlock(BLOCK_V4_1, "test_host2", TEST_HOST)
 
         # Reads at 3
         self.m_etcd_client.read.return_value = m_result0
@@ -1353,7 +1360,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
 
         with self.assertRaises(HostAffinityClaimedError):
             self.client._claim_block_affinity(block_our_host.host_affinity,
-                                              block.cidr)
+                                              block.cidr, IPAMConfig())
 
         key = _block_datastore_key(block_our_host.cidr)
         value = block_our_host.to_json()
@@ -1378,7 +1385,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         8 Try to write the new block, success
         """
 
-        block = AllocationBlock(IPNetwork("10.11.0.0/26"), "test_host1")
+        block = AllocationBlock(IPNetwork("10.11.0.0/26"), "test_host1", False)
         m_result0 = Mock(spec=EtcdResult)
         m_result0.value = block.to_json()
 
@@ -1403,7 +1410,8 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         with patch("pycalico.datastore.DatastoreClient.get_ip_pools",
                    m_get_ip_pools):
 
-            cidr = self.client._new_affine_block("test_host2", 4, None)
+            cidr = self.client._new_affine_block("test_host2", 4,
+                                                 None, IPAMConfig())
             assert_equal(cidr, IPNetwork("10.11.0.64/26"))
 
             # 1st block write is the .0.0 block, but with test_host2 affinity.
@@ -1412,7 +1420,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
             value0 = block.to_json()
 
             # 2nd block write is the .0.64 block.
-            block1 = AllocationBlock(cidr, "test_host2")
+            block1 = AllocationBlock(cidr, "test_host2", False)
             key1 = _block_datastore_key(cidr)
             value1 = block1.to_json()
 
@@ -1436,7 +1444,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
                    m_get_ip_pools):
             assert_raises(PoolNotFound,
                           self.client._new_affine_block,
-                          "test_host1", 4, IPPool("10.11.0.0/8"))
+                          "test_host1", 4, IPPool("10.11.0.0/8"), IPAMConfig())
 
     def test_new_affine_block_good_pool(self):
         """
@@ -1454,7 +1462,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
                    m_get_ip_pools):
             assert_raises(NoFreeBlocksError,
                           self.client._new_affine_block,
-                          "test_host1", 4, IPPool("10.11.0.0/16"))
+                          "test_host1", 4, IPPool("10.11.0.0/16"), IPAMConfig())
 
             # Two /16 pools means 2048 blocks to try.  Assert that we only
             # work the one pool, or 1024 blocks.
@@ -1791,3 +1799,96 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
 
         self.assertRaises(CASError, self.client._compare_and_swap_handle,
                           handle0)
+
+
+class TestIPAMConfig(unittest.TestCase):
+    """
+    Test management of IPAM configuration.
+    """
+
+    def setUp(self):
+        self.client = IPAMClient()
+        self.m_etcd_client = Mock(spec=Client)
+        self.client.etcd_client = self.m_etcd_client
+
+    def test_get_ipam_config(self):
+        """
+        Test get_ipam_config()
+        """
+        # Test config returned is correctly converted to an IPConfig object.
+        cfg = IPAMConfig(auto_allocate_blocks=True, strict_host_affinity=True)
+        result = Mock(spec=EtcdResult)
+        result.value = cfg.to_json()
+        self.m_etcd_client.read.return_value = result
+        self.assertEquals(self.client.get_ipam_config(), cfg)
+
+        # Test missing config returns the default.
+        cfg = IPAMConfig()
+        self.m_etcd_client.read.side_effect = EtcdKeyNotFound
+        self.assertEquals(self.client.get_ipam_config(), cfg)
+
+    def test_set_ipam_config(self):
+        """
+        Test set_ipam_config()
+        """
+        # Test no updates made if config has not actually changed.
+        cfg = IPAMConfig(auto_allocate_blocks=True)
+        cfg2 = IPAMConfig(auto_allocate_blocks=False)
+        result = Mock(spec=EtcdResult)
+        result.value = cfg.to_json()
+        self.m_etcd_client.read.return_value = result
+        self.client.set_ipam_config(cfg)
+        self.assertEquals(self.m_etcd_client.write.call_count, 0)
+
+        with patch("pycalico.ipam.BlockHandleReaderWriter._read_blocks",
+                   return_value=([BLOCK_V4_1], [])):
+            self.assertRaises(IPAMConfigConflictError,
+                              self.client.set_ipam_config,
+                              cfg2)
+
+        with patch("pycalico.ipam.BlockHandleReaderWriter._read_blocks",
+                   return_value=([], [BLOCK_V6_1])):
+            self.assertRaises(IPAMConfigConflictError,
+                              self.client.set_ipam_config,
+                              cfg2)
+
+        with patch("pycalico.ipam.BlockHandleReaderWriter._read_blocks",
+                   return_value=([], [])):
+            self.client.set_ipam_config(cfg2)
+            self.m_etcd_client.write.assert_called_once_with(IPAM_CONFIG_PATH,
+                                                             cfg2.to_json())
+
+    def test_ipam_config_operators(self):
+        """
+        Test IPAMConfig operators
+        """
+        cfg0 = IPAMConfig()
+        cfg1 = IPAMConfig(auto_allocate_blocks=True,
+                          strict_host_affinity=False)
+        cfg2 = IPAMConfig(auto_allocate_blocks=False,
+                          strict_host_affinity=False)
+        cfg3 = IPAMConfig(auto_allocate_blocks=True,
+                          strict_host_affinity=True)
+
+        self.assertEquals(cfg0, cfg1)
+        self.assertNotEquals(cfg0, cfg2)
+        self.assertNotEquals(cfg0, cfg3)
+
+        self.assertNotEquals(cfg0, "not a config object")
+        self.assertFalse(cfg0 == "not a config object")
+
+        self.assertTrue(isinstance(cfg0.__repr__(), str))
+
+    def test_ipam_config_from_json(self):
+        """
+        Test IPAMConfig.from_json() and IPAMConfig.to_json()
+        """
+        cfg0 = IPAMConfig.from_json('''{
+    "auto_allocate_blocks": false,
+    "strict_host_affinity": true
+}''')
+        self.assertTrue(cfg0.strict_host_affinity)
+        self.assertFalse(cfg0.auto_allocate_blocks)
+
+        cfg1 = IPAMConfig.from_json(cfg0.to_json())
+        self.assertEquals(cfg0, cfg1)

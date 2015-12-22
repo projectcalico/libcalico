@@ -480,3 +480,75 @@ class Rule(dict):
             out.extend(["cidr", str(self["dst_net"])])
 
         return " ".join(out)
+
+
+class IPAMConfig(object):
+    """
+    IPAM configuration.
+    """
+    AUTO_ALLOCATE_BLOCKS = "auto_allocate_blocks"
+    STRICT_HOST_AFFINITY = "strict_host_affinity"
+
+    def __init__(self, auto_allocate_blocks=True, strict_host_affinity=False):
+        self.auto_allocate_blocks = auto_allocate_blocks
+        """
+        Whether Calico IPAM module is allowed to auto-allocated affine blocks
+        when auto-assigning IP addresses.
+        """
+
+        self.strict_host_affinity = strict_host_affinity
+        """
+        Whether strict host affinity should be observed for affine blocks.
+        """
+
+    def to_json(self):
+        """
+        Convert the IPAMConfiguration object to a JSON string.
+
+        :return:  A JSON string representation of this object.
+        """
+        return json.dumps(self.to_json_dict())
+
+    def to_json_dict(self):
+        """
+        Convert the Rule object to a dict that can be directly converted to
+        JSON.
+
+        :return: A dict containing valid JSON types.
+        """
+        return {
+            IPAMConfig.AUTO_ALLOCATE_BLOCKS: self.auto_allocate_blocks,
+            IPAMConfig.STRICT_HOST_AFFINITY: self.strict_host_affinity
+        }
+
+    @classmethod
+    def from_json(cls, json_str):
+        """
+        Create an IPAMConfiguration from the raw JSON.
+        :param json_str: A JSON string representation of an IPAMConfiguration
+        object.
+        :return: An IPAMConfiguration object.
+        """
+        json_dict = json.loads(json_str)
+        return IPAMConfig(
+            auto_allocate_blocks=json_dict[IPAMConfig.AUTO_ALLOCATE_BLOCKS],
+            strict_host_affinity=json_dict[IPAMConfig.STRICT_HOST_AFFINITY]
+        )
+
+    def __eq__(self, other):
+        if not isinstance(other, IPAMConfig):
+            return NotImplemented
+        return (self.auto_allocate_blocks == other.auto_allocate_blocks and
+                self.strict_host_affinity == other.strict_host_affinity)
+
+    def __ne__(self, other):
+        result = self.__eq__(other)
+        if result is NotImplemented:
+            return result
+        return not result
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return "IPAMConfig(%s)" % self.to_json()
