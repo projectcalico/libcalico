@@ -5,7 +5,7 @@ setup(
 
     # Version is required - pycalico can be installed directly from GitHub
     # using pip install.
-    version='0.7.0-dev',
+    version='0.8.0',
 
     # Don't need a version until we publish to PIP or other forum.
     # version='0.0.0',
