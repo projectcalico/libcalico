@@ -60,5 +60,4 @@ class PoolNotFound(DataStoreError):
     """
     IPPool cannot be found or it has not been configured correctly
     """
-    def __init__(self, ip):
-        self.ip = ip
+    pass

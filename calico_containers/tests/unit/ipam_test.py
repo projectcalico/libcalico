@@ -753,7 +753,7 @@ class TestIPAMClient(unittest.TestCase):
         with patch("pycalico.datastore.DatastoreClient.get_ip_pools",
                    m_get_ip_pools):
             ip0 = IPAddress("10.12.12.55")
-            assert_raises(ValueError, self.client.assign_ip, ip0, None, {},
+            assert_raises(PoolNotFound, self.client.assign_ip, ip0, None, {},
                           host=TEST_HOST)
 
         # Verify we did not write anything.
@@ -1383,7 +1383,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
 
         with patch("pycalico.datastore.DatastoreClient.get_ip_pools",
                    m_get_ip_pools):
-            assert_raises(ValueError,
+            assert_raises(PoolNotFound,
                           self.client._new_affine_block,
                           "test_host1", 4, IPPool("10.11.0.0/8"))
 
@@ -1466,7 +1466,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
 
         with patch("pycalico.datastore.DatastoreClient.get_ip_pools",
                    m_get_ip_pools):
-            assert_raises(ValueError, self.client._random_blocks,
+            assert_raises(PoolNotFound, self.client._random_blocks,
                           [], 4, IPPool("10.1.0.0/16"))
 
     def test_random_blocks_good_pool(self):
