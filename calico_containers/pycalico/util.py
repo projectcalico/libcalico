@@ -23,6 +23,7 @@ IPV4_RE = re.compile(r'inet ((?:\d+\.){3}\d+)\/\d+')
 # Grabs v6 addresses
 IPV6_RE = re.compile(r'inet6 ([a-fA-F\d:]+)\/\d{1,3}')
 
+
 def generate_cali_interface_name(prefix, ep_id):
     """Helper method to generate a name for a calico veth, given the endpoint ID
 

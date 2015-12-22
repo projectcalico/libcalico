@@ -24,7 +24,8 @@ from netaddr import IPAddress, IPNetwork
 
 from pycalico.util import generate_cali_interface_name, validate_characters, \
     validate_ports, validate_icmp_type
-from pycalico.block import CidrTooSmallError, BLOCK_PREFIXLEN
+from pycalico.block import BLOCK_PREFIXLEN
+from pycalico.datastore_errors import InvalidBlockSizeError
 
 
 IF_PREFIX = "cali"
@@ -124,7 +125,7 @@ class IPPool(object):
     Class encapsulating an IPPool.
     """
 
-    def __init__(self, cidr, ipip=False, masquerade=False, ipam=True):
+    def __init__(self, cidr, ipip=False, masquerade=False, ipam=True, disabled=False):
         """
         Constructor.
         :param cidr: IPNetwork object (or CIDR string) representing the pool.
@@ -134,13 +135,15 @@ class IPPool(object):
         :param ipip: Use IP-IP for this pool.
         :param masquerade: Enable masquerade (outgoing NAT) for this pool.
         :param ipam: Whether this IPPool is used by Calico IPAM.
+        :param disabled: Whether this IPPool is disabled.  If disabled, the pool
+        is not used by the IPAM client for new allocation blocks.
         """
         # Normalize the CIDR (e.g. 1.2.3.4/16 -> 1.2.0.0/16)
         self.cidr = IPNetwork(cidr).cidr
         self.ipam = bool(ipam)
         if self.ipam:
             if self.cidr.prefixlen > BLOCK_PREFIXLEN[self.cidr.version]:
-                raise CidrTooSmallError("The CIDR block size for an "
+                raise InvalidBlockSizeError("The CIDR block size for an "
                     "IPv%s pool when using Calico IPAM must have a prefix "
                     "length of %s or lower. Given: %s" %
                     (self.cidr.version,
@@ -148,6 +151,7 @@ class IPPool(object):
                      self.cidr.prefixlen))
         self.ipip = bool(ipip)
         self.masquerade = bool(masquerade)
+        self.disabled = bool(disabled)
 
     def to_json(self):
         """
@@ -159,10 +163,13 @@ class IPPool(object):
             json_dict["ipip"] = "tunl0"
         if self.masquerade:
             json_dict["masquerade"] = True
-        # Only write IPAM when set to False, this keeps the behavior the same
-        # for old versions of the data.
+        # Only write "ipam" and "disabled" when they differ from their default
+        # values.  This keeps the interface unchanged between versions when
+        # these fields are not required.
         if not self.ipam:
             json_dict["ipam"] = False
+        if self.disabled:
+            json_dict["disabled"] = True
         return json.dumps(json_dict)
 
     @classmethod
@@ -172,13 +179,14 @@ class IPPool(object):
         :param json_str: The JSON string representing an IPPool.
         :return: An IPPool object.
         """
-        # Note that "ipam" is a newer field that defaults to True, so set to
-        # True if not present in older JSON data.
+        # The fields "ipam" and "disabled" may not be present in older versions
+        # of the data, so use default values if not present.
         json_dict = json.loads(json_str)
         return cls(json_dict["cidr"],
                    ipip=json_dict.get("ipip"),
                    masquerade=json_dict.get("masquerade"),
-                   ipam=json_dict.get("ipam", True))
+                   ipam=json_dict.get("ipam", True),
+                   disabled=json_dict.get("disabled", False))
 
     def __eq__(self, other):
         if not isinstance(other, IPPool):
@@ -186,7 +194,8 @@ class IPPool(object):
         return (self.cidr == other.cidr and
                 self.ipip == other.ipip and
                 self.masquerade == other.masquerade and
-                self.ipam == other.ipam)
+                self.ipam == other.ipam and
+                self.disabled == other.disabled)
 
     def __contains__(self, item):
         """
@@ -492,3 +501,75 @@ class Rule(dict):
             out.extend(["cidr", str(self["dst_net"])])
 
         return " ".join(out)
+
+
+class IPAMConfig(object):
+    """
+    IPAM configuration.
+    """
+    AUTO_ALLOCATE_BLOCKS = "auto_allocate_blocks"
+    STRICT_AFFINITY = "strict_affinity"
+
+    def __init__(self, auto_allocate_blocks=True, strict_affinity=False):
+        self.auto_allocate_blocks = auto_allocate_blocks
+        """
+        Whether Calico IPAM module is allowed to auto-allocate affine blocks
+        when auto-assigning IP addresses.
+        """
+
+        self.strict_affinity = strict_affinity
+        """
+        Whether strict affinity should be observed for affine blocks.
+        """
+
+    def to_json(self):
+        """
+        Convert the IPAMConfig object to a JSON string.
+
+        :return:  A JSON string representation of this object.
+        """
+        return json.dumps(self.to_json_dict())
+
+    def to_json_dict(self):
+        """
+        Convert the Rule object to a dict that can be directly converted to
+        JSON.
+
+        :return: A dict containing valid JSON types.
+        """
+        return {
+            IPAMConfig.AUTO_ALLOCATE_BLOCKS: self.auto_allocate_blocks,
+            IPAMConfig.STRICT_AFFINITY: self.strict_affinity
+        }
+
+    @classmethod
+    def from_json(cls, json_str):
+        """
+        Create an IPAMConfig from the raw JSON.
+        :param json_str: A JSON string representation of an IPAMConfig
+        object.
+        :return: An IPAMConfig object.
+        """
+        json_dict = json.loads(json_str)
+        return IPAMConfig(
+            auto_allocate_blocks=json_dict[IPAMConfig.AUTO_ALLOCATE_BLOCKS],
+            strict_affinity=json_dict[IPAMConfig.STRICT_AFFINITY]
+        )
+
+    def __eq__(self, other):
+        if not isinstance(other, IPAMConfig):
+            return NotImplemented
+        return (self.auto_allocate_blocks == other.auto_allocate_blocks and
+                self.strict_affinity == other.strict_affinity)
+
+    def __ne__(self, other):
+        result = self.__eq__(other)
+        if result is NotImplemented:
+            return result
+        return not result
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return "IPAMConfig(%s)" % self.to_json()

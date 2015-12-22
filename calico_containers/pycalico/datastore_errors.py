@@ -61,3 +61,11 @@ class PoolNotFound(DataStoreError):
     IPPool cannot be found or it has not been configured correctly
     """
     pass
+
+
+class InvalidBlockSizeError(DataStoreError):
+    """
+    Attempting to claim or release a CIDR that is smaller than the minimum
+    block size.
+    """
+    pass

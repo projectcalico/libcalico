@@ -1,4 +1,5 @@
 # Copyright 2015 Metaswitch Networks
+# Copyright 2015 Metaswitch Networks
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,13 +22,15 @@ from etcd import EtcdResult, Client, EtcdAlreadyExist, EtcdKeyNotFound, EtcdComp
 
 from pycalico.ipam import (IPAMClient, BlockHandleReaderWriter,
                            CASError, NoFreeBlocksError, _block_datastore_key,
-                           _handle_datastore_key, HostAffinityClaimedError)
-from pycalico.datastore_errors import PoolNotFound
+                           _handle_datastore_key, HostAffinityClaimedError,
+                           IPAMConfigConflictError)
+from pycalico.datastore_errors import PoolNotFound, InvalidBlockSizeError
 from pycalico.block import AllocationBlock, AddressNotAssignedError, BLOCK_SIZE
 from pycalico.handle import AllocationHandle, AddressCountTooLow
-from pycalico.datastore_datatypes import IPPool
+from pycalico.datastore import IPAM_CONFIG_PATH
+from pycalico.datastore_datatypes import IPPool, IPAMConfig
 from block_test import (_test_block_empty_v4, _test_block_empty_v6,
-                        BLOCK_V6_1, BLOCK_V4_1)
+                        BLOCK_V6_1, BLOCK_V4_1, _test_block_not_empty_v4)
 
 network = IPNetwork("192.168.25.0/24")
 BLOCK_V4_2 = IPNetwork("10.11.45.0/26")
@@ -40,6 +43,10 @@ class TestIPAMClient(unittest.TestCase):
         self.client = IPAMClient()
         self.m_etcd_client = Mock(spec=Client)
         self.client.etcd_client = self.m_etcd_client
+
+        # The majority of tests use the default IPAM configuration, so mock
+        # out the get_ipam_config() method,
+        self.client.get_ipam_config = Mock(return_value=IPAMConfig())
 
     @patch("pycalico.ipam.get_hostname", return_value=TEST_HOST)
     def test_auto_assign(self, m_get_hostname):
@@ -156,9 +163,10 @@ class TestIPAMClient(unittest.TestCase):
         def m_get_affine_blocks(self, host, ip_version, pool):
             return [BLOCK_V4_1, BLOCK_V4_2]
 
-        def m_get_ip_pools(self, version, ipam):
+        def m_get_ip_pools(self, version, ipam, include_disabled):
             # The two claimed blocks are the only pools.
             assert ipam
+            assert not include_disabled
             return [IPPool(BLOCK_V4_1), IPPool(BLOCK_V4_2)]
 
         # 1st block has 2 free addresses.
@@ -338,12 +346,13 @@ class TestIPAMClient(unittest.TestCase):
         def m_get_affine_blocks(self, host, ip_version, pool):
             return []
 
-        def m_get_ip_pools(self, version, ipam):
+        def m_get_ip_pools(self, version, ipam, include_disabled):
             assert ipam
+            assert not include_disabled
             return [IPPool("192.168.0.0/16")]
 
         # Reads on 1, 4
-        block = AllocationBlock(IPNetwork("192.168.0.0/26"), "test_host1")
+        block = AllocationBlock(IPNetwork("192.168.0.0/26"), "test_host1", False)
         m_result = Mock(spec=EtcdResult)
         m_result.value = block.to_json()
         self.m_etcd_client.read.side_effect = [EtcdKeyNotFound(), m_result]
@@ -378,16 +387,17 @@ class TestIPAMClient(unittest.TestCase):
         def m_read_block(self, block_cidr):
             if block_cidr in affine_blocks:
                 # All our blocks are full.
-                block = AllocationBlock(block_cidr, "test_host1")
+                block = AllocationBlock(block_cidr, "test_host1", False)
                 block.auto_assign(256, None, {}, TEST_HOST)
             else:
                 # Other blocks are not.
-                block = AllocationBlock(block_cidr, "test_host2")
+                block = AllocationBlock(block_cidr, "test_host2", False)
                 rando_blocks.add(block)
             return block
 
-        def m_get_ip_pools(self, version, ipam):
+        def m_get_ip_pools(self, version, ipam, include_disabled):
             assert ipam
+            assert not include_disabled
             return [IPPool("10.11.0.0/18")]
 
         with patch("pycalico.ipam.BlockHandleReaderWriter._get_affine_blocks",
@@ -442,7 +452,7 @@ class TestIPAMClient(unittest.TestCase):
            IPAM_HOST_AFFINITY_PATH.
         5. Client B attempts to read the block, but when it tries to auto
            assign from the block, it fails because a different host has
-           affinity.  This throws a NoHostAffinityWarning.
+           affinity.  This throws a NoHostAffinityError.
 
         """
 
@@ -459,19 +469,20 @@ class TestIPAMClient(unittest.TestCase):
                 raise KeyError()
             elif block_cidr is BLOCK_V4_2:
                 # This block exists, but we don't have host affinity to it.
-                block = AllocationBlock(BLOCK_V4_2, "test_host2")
+                block = AllocationBlock(BLOCK_V4_2, "test_host2", False)
             elif block_cidr is BLOCK_V4_3:
                 # This block exists and we have host affinity.  Allocated IPs
                 # should come from this block.
-                block = AllocationBlock(BLOCK_V4_3, "test_host1")
+                block = AllocationBlock(BLOCK_V4_3, "test_host1", False)
             else:
                 # Success on BLOCK_V4_3, so no additional blocks should be
                 # read.
                 assert_true(False)
             return block
 
-        def m_get_ip_pools(self, version, ipam):
+        def m_get_ip_pools(self, version, ipam, include_disabled):
             assert ipam
+            assert not include_disabled
             return [IPPool("10.11.0.0/18")]
 
         with patch("pycalico.ipam.BlockHandleReaderWriter._get_affine_blocks",
@@ -500,7 +511,7 @@ class TestIPAMClient(unittest.TestCase):
         # 4 attempts to read BLOCK_V4_1, then one attempt to read
         # first_free_block
         first_free_block = IPNetwork("10.11.0.0/26")
-        block = AllocationBlock(first_free_block, "test_host1")
+        block = AllocationBlock(first_free_block, "test_host1", False)
         m_read_block = Mock()
         m_read_block.side_effect = [KeyError(),
                                     KeyError(),
@@ -510,8 +521,9 @@ class TestIPAMClient(unittest.TestCase):
         # Note that _get_new_affine_block calls etcd_client.read() directly.
         self.m_etcd_client.read.side_effect = EtcdKeyNotFound()
 
-        def m_get_ip_pools(self, version, ipam):
+        def m_get_ip_pools(self, version, ipam, include_disabled):
             assert ipam
+            assert not include_disabled
             return [IPPool("10.11.0.0/18")]
 
         with patch("pycalico.ipam.BlockHandleReaderWriter._get_affine_blocks",
@@ -665,12 +677,13 @@ class TestIPAMClient(unittest.TestCase):
         Test assign_ip() when address is in a block that hasn't been written.
         """
 
-        def m_get_ip_pools(self, version, ipam):
+        def m_get_ip_pools(self, version, ipam, include_disabled):
             assert ipam
+            assert not include_disabled
             return [IPPool("10.11.0.0/16"), IPPool("192.168.0.0/16")]
 
         # 1st read, doesn't exist.  2nd read, does exist, empty.
-        block = AllocationBlock(BLOCK_V4_1, "test_host1")
+        block = AllocationBlock(BLOCK_V4_1, "test_host1", False)
         m_result0 = Mock(spec=EtcdResult)
         m_result0.value = block.to_json()
         self.m_etcd_client.read.side_effect = [EtcdKeyNotFound(), m_result0]
@@ -709,13 +722,14 @@ class TestIPAMClient(unittest.TestCase):
             7 Compare-and-swap new allocation with read from 3.
         """
 
-        def m_get_ip_pools(self, version, ipam):
+        def m_get_ip_pools(self, version, ipam, include_disabled):
             assert ipam
+            assert not include_disabled
             return [IPPool("10.11.0.0/16"), IPPool("192.168.0.0/16")]
 
         # 2nd read.
         block = _test_block_empty_v4()
-        block.assign(IPAddress("10.11.12.56"), None, {})
+        block.assign(IPAddress("10.11.12.56"), None, {}, TEST_HOST)
         m_result1 = Mock(spec=EtcdResult)
         m_result1.value = block.to_json()
 
@@ -743,8 +757,9 @@ class TestIPAMClient(unittest.TestCase):
         Test assign_ip() when address is not in configured pools.
         """
 
-        def m_get_ip_pools(self, version, ipam):
+        def m_get_ip_pools(self, version, ipam, include_disabled):
             assert ipam
+            assert not include_disabled
             return [IPPool("10.11.0.0/16"), IPPool("192.168.0.0/16")]
 
         # block doesn't exist.
@@ -770,12 +785,12 @@ class TestIPAMClient(unittest.TestCase):
         m_result6 = Mock(spec=EtcdResult)
         def m_read_block(self, block_cidr):
             block4 = _test_block_empty_v4()
-            block4.assign(ip4, None, {})
+            block4.assign(ip4, None, {}, TEST_HOST)
             block4.db_result = m_result4
             if block_cidr == block4.cidr:
                 return block4
             block6 = _test_block_empty_v6()
-            block6.assign(ip6, None, {})
+            block6.assign(ip6, None, {}, TEST_HOST)
             block6.db_result = m_result6
             if block_cidr == block6.cidr:
                 return block6
@@ -790,6 +805,35 @@ class TestIPAMClient(unittest.TestCase):
         self.m_etcd_client.update.assert_has_calls([call(m_result4),
                                                     call(m_result6)],
                                                    any_order=True)
+
+    def test_release_no_affinity(self):
+        """
+        Test release of an IP from a block with no affinity.
+        """
+        ip4 = BLOCK_V4_1[13]
+        m_result4 = Mock(spec=EtcdResult)
+        m_result4.key = "/this/is/the/block/key"
+        m_result4.modifiedIndex = 123
+        def m_read_block(self, block_cidr):
+            block4 = _test_block_empty_v4()
+            block4.host_affinity = None
+            block4.assign(ip4, None, {}, TEST_HOST)
+            block4.db_result = m_result4
+            if block_cidr == block4.cidr:
+                return block4
+            assert_true(False, "Unexpected block CIDR")
+
+        with patch("pycalico.ipam.BlockHandleReaderWriter._read_block",
+                   m_read_block):
+            ips = {ip4}
+            err = self.client.release_ips(ips)
+            assert_set_equal(err, set())
+
+        # If the block has no affinity, the block is deleted rather than
+        # updated.
+        self.m_etcd_client.delete.assert_has_calls([
+            call('/this/is/the/block/key', prevIndex=123),
+        ])
 
     def test_release_already_unallocated(self):
         """
@@ -828,7 +872,7 @@ class TestIPAMClient(unittest.TestCase):
             if block_cidr == IPNetwork("10.11.12/26"):
                 raise KeyError
             block6 = _test_block_empty_v6()
-            block6.assign(ip6, None, {})
+            block6.assign(ip6, None, {}, TEST_HOST)
             block6.db_result = m_result6
             if block_cidr == block6.cidr:
                 return block6
@@ -856,13 +900,13 @@ class TestIPAMClient(unittest.TestCase):
         def m_read_block(self, block_cidr):
             block4 = _test_block_empty_v4()
             for ip4 in ip4s:
-                block4.assign(ip4, None, {})
+                block4.assign(ip4, None, {}, TEST_HOST)
             block4.db_result = m_result4
             if block_cidr == block4.cidr:
                 return block4
             block6 = _test_block_empty_v6()
             for ip6 in ip6s:
-                block6.assign(ip6, None, {})
+                block6.assign(ip6, None, {}, TEST_HOST)
             block6.db_result = m_result6
             if block_cidr == block6.cidr:
                 return block6
@@ -895,12 +939,12 @@ class TestIPAMClient(unittest.TestCase):
 
         def m_read_block(self, block_cidr):
             block4 = _test_block_empty_v4()
-            block4.assign(ip4, None, {})
+            block4.assign(ip4, None, {}, TEST_HOST)
             block4.db_result = m_result4
             if block_cidr == block4.cidr:
                 return block4
             block6 = _test_block_empty_v6()
-            block6.assign(ip6, None, {})
+            block6.assign(ip6, None, {}, TEST_HOST)
             block6.db_result = m_result6
             if block_cidr == block6.cidr:
                 return block6
@@ -944,11 +988,11 @@ class TestIPAMClient(unittest.TestCase):
         m_resultb4 = Mock(spec=EtcdResult)
         m_resultb6 = Mock(spec=EtcdResult)
         block4 = _test_block_empty_v4()
-        block4.assign(ip4, handle_id, {})
+        block4.assign(ip4, handle_id, {}, TEST_HOST)
         block4.db_result = m_resultb4
         m_resultb4.key = "fake/ipv4key"
         block6 = _test_block_empty_v6()
-        block6.assign(ip6, handle_id, {})
+        block6.assign(ip6, handle_id, {}, TEST_HOST)
         block6.db_result = m_resultb6
         m_resultb6.key = "fake/ipv6key"
 
@@ -999,11 +1043,11 @@ class TestIPAMClient(unittest.TestCase):
         m_resultb4 = Mock(spec=EtcdResult)
         m_resultb6 = Mock(spec=EtcdResult)
         block4 = _test_block_empty_v4()
-        block4.assign(ip4, handle_id, {})
+        block4.assign(ip4, handle_id, {}, TEST_HOST)
         m_resultb4.key = _block_datastore_key(cidr4)
         m_resultb4.value = block4.to_json()
         block6 = _test_block_empty_v6()
-        block6.assign(ip6, handle_id, {})
+        block6.assign(ip6, handle_id, {}, TEST_HOST)
         m_resultb6.key = _block_datastore_key(cidr6)
         m_resultb6.value = block6.to_json()
 
@@ -1097,7 +1141,7 @@ class TestIPAMClient(unittest.TestCase):
 
         m_resultb4 = Mock(spec=EtcdResult)
         block4 = _test_block_empty_v4()
-        block4.assign(ip4, None, {})
+        block4.assign(ip4, None, {}, TEST_HOST)
         m_resultb4.key = _block_datastore_key(cidr4)
         m_resultb4.value = block4.to_json()
 
@@ -1133,9 +1177,9 @@ class TestIPAMClient(unittest.TestCase):
         handle_id0 = "handle_id_1"
 
         block4 = _test_block_empty_v4()
-        block4.assign(ip4, handle_id0, {})
+        block4.assign(ip4, handle_id0, {}, TEST_HOST)
         block6 = _test_block_empty_v6()
-        block6.assign(ip6, handle_id0, {})
+        block6.assign(ip6, handle_id0, {}, TEST_HOST)
 
         def m_read_block(_self, block_cidr):
             if block_cidr == block4.cidr:
@@ -1182,9 +1226,9 @@ class TestIPAMClient(unittest.TestCase):
         attr6 = {"ccd": "ddd"}
 
         block4 = _test_block_empty_v4()
-        block4.assign(ip4, handle_id4, attr4)
+        block4.assign(ip4, handle_id4, attr4, TEST_HOST)
         block6 = _test_block_empty_v6()
-        block6.assign(ip6, handle_id6, attr6)
+        block6.assign(ip6, handle_id6, attr6, TEST_HOST)
 
         def m_read_block(_self, block_cidr):
             if block_cidr == block4.cidr:
@@ -1204,6 +1248,130 @@ class TestIPAMClient(unittest.TestCase):
                           self.client.get_assignment_attributes,
                           IPAddress("10.11.13.13"))
 
+    def test_claim_affinity(self):
+        """
+        Mainline test of claim_affinity()
+        """
+        claim_cidr = IPNetwork("10.11.0.0/24")
+
+        def m_get_ip_pools(self, version, ipam, include_disabled):
+            assert ipam
+            assert not include_disabled
+            return [IPPool("10.11.0.0/16"), IPPool("192.168.0.0/16")]
+
+        with patch("pycalico.ipam.BlockHandleReaderWriter.get_ipam_config",
+                   return_value="config"), \
+             patch("pycalico.ipam.BlockHandleReaderWriter._claim_block_affinity",
+                   side_effect=[None, None, HostAffinityClaimedError]), \
+             patch("pycalico.datastore.DatastoreClient.get_ip_pools",
+                   m_get_ip_pools):
+            claimed, not_claimed = self.client.claim_affinity(claim_cidr)
+
+        assert_equal(claimed,
+                     [IPNetwork("10.11.0.0/26"), IPNetwork("10.11.0.64/26")])
+        assert_equal(not_claimed,
+                     [IPNetwork("10.11.0.128/26")])
+
+    def test_claim_affinity_invalid_pool(self):
+        """
+        Test of claim_affinity() with a CIDR not in a pool.
+        """
+        def m_get_ip_pools(self, version, ipam, include_disabled):
+            assert ipam
+            assert not include_disabled
+            return [IPPool("10.11.0.0/16"), IPPool("192.168.0.0/16")]
+
+        with patch("pycalico.datastore.DatastoreClient.get_ip_pools",
+                   m_get_ip_pools):
+            assert_raises(PoolNotFound,
+                          self.client.claim_affinity,
+                          IPNetwork("100.11.0.0/23"))
+
+    def test_claim_affinity_small_block(self):
+        """
+        Test of claim_affinity() with a CIDR smaller than the block size.
+        """
+        assert_raises(InvalidBlockSizeError,
+                      self.client.claim_affinity,
+                      IPNetwork("10.11.0.0/30"))
+
+    def test_release_affinity(self):
+        """
+        Mainline test of release_affinity()
+        """
+        release_cidr = IPNetwork("10.11.0.0/24")
+
+        with patch("pycalico.ipam.BlockHandleReaderWriter.get_ipam_config",
+                   return_value="config"), \
+             patch("pycalico.ipam.BlockHandleReaderWriter._release_block_affinity",
+                   side_effect=[None, None, HostAffinityClaimedError, KeyError]):
+            released, not_claimed, not_owned = self.client.release_affinity(release_cidr)
+
+        assert_equal(released,
+                     [IPNetwork("10.11.0.0/26"), IPNetwork("10.11.0.64/26")])
+        assert_equal(not_owned,
+                     [IPNetwork("10.11.0.128/26")])
+        assert_equal(not_claimed,
+                     [IPNetwork("10.11.0.192/26")])
+
+    def test_release_affinity_small_block(self):
+        """
+        Test of release_affinity() with a CIDR smaller than the block size.
+        """
+        assert_raises(InvalidBlockSizeError,
+                      self.client.release_affinity,
+                      IPNetwork("10.11.0.0/30"))
+
+    def test_release_host_affinities(self):
+        """
+        Mainline test of release_host_affinities()
+        """
+        net1 = IPNetwork("1.2.3.0/24")
+        net2 = IPNetwork("2.3.0.0/16")
+
+        with patch("pycalico.ipam.BlockHandleReaderWriter._get_affine_blocks",
+                   return_value=[net1, net2]), \
+             patch("pycalico.ipam.BlockHandleReaderWriter._release_block_affinity",
+                   side_effect=[None, HostAffinityClaimedError, None, None]) as m_release:
+            self.client.release_host_affinities("fred")
+            m_release.assert_has_calls([call("fred", net1), call("fred", net2)])
+
+    def test_release_pool_affinities(self):
+        """
+        Mainline test of release_pool_affinities()
+        """
+
+        with patch("pycalico.ipam.BlockHandleReaderWriter._get_host_block_pairs",
+                   return_value=[("host1", IPNetwork("1.2.3.0/26"))]), \
+             patch("pycalico.ipam.BlockHandleReaderWriter._release_block_affinity",
+                   side_effect=None):
+            self.client.release_pool_affinities(IPPool("1.2.0.0/16"))
+
+    def test_release_pool_affinities_conflict(self):
+        """
+        Test of release_pool_affinities() with repeated conflicts.
+        """
+
+        with patch("pycalico.ipam.BlockHandleReaderWriter._get_host_block_pairs",
+                   return_value=[("host1", IPNetwork("1.2.3.0/26"))]), \
+             patch("pycalico.ipam.BlockHandleReaderWriter._release_block_affinity",
+                   side_effect=KeyError):
+            assert_raises(KeyError,
+                          self.client.release_pool_affinities,
+                          IPPool("1.2.0.0/16"))
+
+    def test_remove_ipam_host(self):
+        """
+        Mainline test of remove_ipam_host().
+        """
+        self.m_etcd_client.delete.side_effect = EtcdKeyNotFound
+        with patch("pycalico.ipam.IPAMClient.release_host_affinities") as m_host_aff:
+            self.client.remove_ipam_host("fred")
+            m_host_aff.assert_called_once_with("fred")
+            self.m_etcd_client.delete.assert_called_once_with(
+                "/calico/ipam/v2/host/fred",
+                recursive=True, dir=True
+            )
 
 class TestBlockHandleReaderWriter(unittest.TestCase):
 
@@ -1211,6 +1379,16 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         self.client = BlockHandleReaderWriter()
         self.m_etcd_client = Mock(spec=Client)
         self.client.etcd_client = self.m_etcd_client
+
+    def test_delete_block(self):
+        """
+        Test _delete_block().
+        """
+        self.m_etcd_client.delete.side_effect = EtcdCompareFailed
+        block = Mock()
+        block.db_result.key = "abc"
+        block.db_result.modifiedIndex = 111
+        assert_raises(CASError, self.client._delete_block, block)
 
     def test_get_affine_blocks(self):
         """
@@ -1291,6 +1469,42 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         block_ids = self.client._get_affine_blocks("test_host", 4, ip_pool)
         assert_list_equal(block_ids, expected_ids)
 
+    def test_get_host_block_pairs(self):
+        """
+        Mainline test of _get_host_block_pairs()
+        """
+        expected_pairs = [("test_host", IPNetwork("10.10.1.0/26"))]
+        returned_ids = ["192.168.3.0/26", "10.10.1.0/26"]
+
+        # Return some blocks.
+        def m_read(path, quorum, recursive):
+            assert quorum
+            assert recursive
+            assert_equal(path, "/calico/ipam/v2/host")
+            result = Mock(spec=EtcdResult)
+            leaves = []
+            for net in returned_ids:
+                node = Mock(spec=EtcdResult)
+                node.value = ""
+                node.key = path + "/test_host/ipv4/block/" + net.replace("/", "-")
+                leaves.append(node)
+            result.leaves = iter(leaves)
+            return result
+        self.m_etcd_client.read.side_effect = m_read
+
+        ip_pool = IPPool(IPNetwork("10.0.0.0/8"))
+        host_block_pairs = self.client._get_host_block_pairs(ip_pool)
+        assert_list_equal(host_block_pairs, expected_pairs)
+
+    def test_get_host_block_pairs_not_found(self):
+        """
+        Test of _get_host_block_pairs() when host key is not found.
+        """
+        self.m_etcd_client.read.side_effect = EtcdKeyNotFound
+        ip_pool = IPPool(IPNetwork("10.0.0.0/8"))
+        host_block_pairs = self.client._get_host_block_pairs(ip_pool)
+        assert_list_equal(host_block_pairs, [])
+
     def test_claim_block_affinity_already_owned(self):
         """
         Test _claim_block_affinity() when we already own the block
@@ -1312,7 +1526,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         self.m_etcd_client.write.side_effect = [None, EtcdAlreadyExist()]
 
         self.client._claim_block_affinity(block.host_affinity,
-                                          block.cidr)
+                                          block.cidr, IPAMConfig())
 
         key = _block_datastore_key(block.cidr)
         value = block.to_json()
@@ -1340,7 +1554,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         m_result0 = Mock(spec=EtcdResult)
         m_result0.value = block.to_json()
 
-        block_our_host = AllocationBlock(BLOCK_V4_1, "test_host2")
+        block_our_host = AllocationBlock(BLOCK_V4_1, "test_host2", False)
 
         # Reads at 3
         self.m_etcd_client.read.return_value = m_result0
@@ -1353,7 +1567,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
 
         with self.assertRaises(HostAffinityClaimedError):
             self.client._claim_block_affinity(block_our_host.host_affinity,
-                                              block.cidr)
+                                              block.cidr, IPAMConfig())
 
         key = _block_datastore_key(block_our_host.cidr)
         value = block_our_host.to_json()
@@ -1362,6 +1576,66 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
                                                         prevExist=False)])
         self.m_etcd_client.read.assert_called_once_with(key, quorum=True)
         self.m_etcd_client.delete.assert_called_once_with(ANY)
+
+    def test_release_block_affinity_not_owned(self):
+        """
+        Test _release_block_affinity() when the block is owned by another
+        host.
+        """
+
+        block = _test_block_empty_v4()
+        m_result0 = Mock(spec=EtcdResult)
+        m_result0.value = block.to_json()
+        self.m_etcd_client.read.return_value = m_result0
+
+        with self.assertRaises(HostAffinityClaimedError):
+            self.client._release_block_affinity("different_host", block.cidr)
+
+    def test_release_block_affinity_empty_cas_error(self):
+        """
+        Test _release_block_affinity() when the block is empty and we hit
+        CAS errors.
+        """
+
+        block = _test_block_empty_v4()
+        m_result0 = Mock(spec=EtcdResult)
+        m_result0.value = block.to_json()
+        m_result0.key = "my/block/key"
+        m_result0.modifiedIndex = 123
+        self.m_etcd_client.read.return_value = m_result0
+
+        self.m_etcd_client.delete.side_effect = [EtcdCompareFailed(),  # 1. Fail
+                                                 EtcdCompareFailed(),  # 2. Fail
+                                                 None,                 # 3. Delete block
+                                                 EtcdKeyNotFound]      # 4. Delete key
+        self.client._release_block_affinity("test_host1", block.cidr)
+        self.m_etcd_client.delete.assert_has_calls([
+                call(m_result0.key, prevIndex=m_result0.modifiedIndex),
+                call(m_result0.key, prevIndex=m_result0.modifiedIndex),
+                call(m_result0.key, prevIndex=m_result0.modifiedIndex),
+                call("/calico/ipam/v2/host/test_host1/ipv4/block/%s" %
+                     str(BLOCK_V4_1).replace("/", "-"))
+            ])
+
+    def test_release_block_affinity_not_empty_cas(self):
+        """
+        Test _release_block_affinity() when the block is not empty.
+        """
+
+        block = _test_block_not_empty_v4()
+        m_result0 = Mock(spec=EtcdResult)
+        m_result0.value = block.to_json()
+        m_result0.key = "my/block/key"
+        m_result0.modifiedIndex = 123
+        self.m_etcd_client.read.return_value = m_result0
+        self.client._release_block_affinity("test_host1", block.cidr)
+
+        # Block should be re-saved with no host affinity
+        block.host_affinity = None
+        self.m_etcd_client.update.assert_called_once_with(ANY)
+        self.m_etcd_client.delete.assert_called_once_with(
+            "/calico/ipam/v2/host/test_host1/ipv4/block/%s" %
+            str(BLOCK_V4_1).replace("/", "-"))
 
     def test_new_affine_block_race(self):
         """
@@ -1378,7 +1652,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         8 Try to write the new block, success
         """
 
-        block = AllocationBlock(IPNetwork("10.11.0.0/26"), "test_host1")
+        block = AllocationBlock(IPNetwork("10.11.0.0/26"), "test_host1", False)
         m_result0 = Mock(spec=EtcdResult)
         m_result0.value = block.to_json()
 
@@ -1396,14 +1670,16 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
             None  # 8
         ]
 
-        def m_get_ip_pools(_self, version, ipam):
+        def m_get_ip_pools(_self, version, ipam, include_disabled):
             assert ipam
+            assert not include_disabled
             return [IPPool("10.11.0.0/16"), IPPool("192.168.0.0/16")]
 
         with patch("pycalico.datastore.DatastoreClient.get_ip_pools",
                    m_get_ip_pools):
 
-            cidr = self.client._new_affine_block("test_host2", 4, None)
+            cidr = self.client._new_affine_block("test_host2", 4,
+                                                 None, IPAMConfig())
             assert_equal(cidr, IPNetwork("10.11.0.64/26"))
 
             # 1st block write is the .0.0 block, but with test_host2 affinity.
@@ -1412,7 +1688,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
             value0 = block.to_json()
 
             # 2nd block write is the .0.64 block.
-            block1 = AllocationBlock(cidr, "test_host2")
+            block1 = AllocationBlock(cidr, "test_host2", False)
             key1 = _block_datastore_key(cidr)
             value1 = block1.to_json()
 
@@ -1428,23 +1704,25 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         Test _new_affine_block when the pool given doesn't match.
         """
 
-        def m_get_ip_pools(_self, version, ipam):
+        def m_get_ip_pools(_self, version, ipam, include_disabled):
             assert ipam
+            assert not include_disabled
             return [IPPool("10.11.0.0/16"), IPPool("192.168.0.0/16")]
 
         with patch("pycalico.datastore.DatastoreClient.get_ip_pools",
                    m_get_ip_pools):
             assert_raises(PoolNotFound,
                           self.client._new_affine_block,
-                          "test_host1", 4, IPPool("10.11.0.0/8"))
+                          "test_host1", 4, IPPool("10.11.0.0/8"), IPAMConfig())
 
     def test_new_affine_block_good_pool(self):
         """
         Test _new_affine_block limits to a single pool if requested.
         """
 
-        def m_get_ip_pools(_self, version, ipam):
+        def m_get_ip_pools(_self, version, ipam, include_disabled):
             assert ipam
+            assert not include_disabled
             return [IPPool("10.11.0.0/16"), IPPool("192.168.0.0/16")]
 
         # Reads are always successful
@@ -1454,7 +1732,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
                    m_get_ip_pools):
             assert_raises(NoFreeBlocksError,
                           self.client._new_affine_block,
-                          "test_host1", 4, IPPool("10.11.0.0/16"))
+                          "test_host1", 4, IPPool("10.11.0.0/16"), IPAMConfig())
 
             # Two /16 pools means 2048 blocks to try.  Assert that we only
             # work the one pool, or 1024 blocks.
@@ -1464,12 +1742,43 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
             assert_equal(self.m_etcd_client.read.call_args[0][0],
                          _block_datastore_key(IPNetwork("10.11.255.192/26")))
 
+    def test_read_blocks(self):
+        """
+        Maineline test of read_blocks.
+        :return:
+        """
+        ipv4_blocks = [_test_block_empty_v4()]
+
+        # Return some blocks.
+        def m_read(path, quorum, recursive):
+            assert quorum
+            assert recursive
+            if path == "/calico/ipam/v2/assignment/ipv6/block/":
+                raise EtcdKeyNotFound()
+
+            assert_equal(path, "/calico/ipam/v2/assignment/ipv4/block/")
+            result = Mock(spec=EtcdResult)
+            leaves = []
+            for block in ipv4_blocks:
+                node = Mock(spec=EtcdResult)
+                node.value = block.to_json()
+                node.key = path + str(block.cidr).replace("/", "-")
+                leaves.append(node)
+            result.leaves = iter(leaves)
+            return result
+        self.m_etcd_client.read.side_effect = m_read
+
+        v4_blocks, v6_blocks = self.client._read_blocks()
+        assert_equal(len(v4_blocks), 1)
+        assert_equal(len(v6_blocks), 0)
+
     def test_random_blocks(self):
         """
         Test _random_blocks() mainline.
         """
-        def m_get_ip_pools(_self, version, ipam):
+        def m_get_ip_pools(_self, version, ipam, include_disabled):
             assert ipam
+            assert not include_disabled
             return [IPPool("10.11.0.0/16")]
 
         excluded_ids = [IPNetwork("10.11.23.0/26"),
@@ -1510,8 +1819,9 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         Test _random_blocks when the requested pool isn't in IPPools.
         """
 
-        def m_get_ip_pools(_self, version, ipam):
+        def m_get_ip_pools(_self, version, ipam, include_disabled):
             assert ipam
+            assert not include_disabled
             return [IPPool("10.11.0.0/16"),
                     IPPool("192.168.0.0/16")]
 
@@ -1524,8 +1834,9 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
         """
         Test _random_blocks() when restricted to a single pool.
         """
-        def m_get_ip_pools(_self, version, ipam):
+        def m_get_ip_pools(_self, version, ipam, include_disabled):
             assert ipam
+            assert not include_disabled
             return [IPPool("10.45.0.0/16"),
                     IPPool("10.11.0.0/16")]
 
@@ -1753,7 +2064,7 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
             return m_result0
 
         self.m_etcd_client.read.side_effect = read
-        self.m_etcd_client.delete.side_effect = EtcdAlreadyExist
+        self.m_etcd_client.delete.side_effect = EtcdCompareFailed
 
         self.assertRaises(RuntimeError, self.client._decrement_handle,
                           handle_id, block_cidr, amount)
@@ -1791,3 +2102,103 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
 
         self.assertRaises(CASError, self.client._compare_and_swap_handle,
                           handle0)
+
+
+class TestIPAMConfig(unittest.TestCase):
+    """
+    Test management of IPAM configuration.
+    """
+
+    def setUp(self):
+        self.client = IPAMClient()
+        self.m_etcd_client = Mock(spec=Client)
+        self.client.etcd_client = self.m_etcd_client
+
+    def test_get_ipam_config(self):
+        """
+        Test get_ipam_config()
+        """
+        # Test config returned is correctly converted to an IPConfig object.
+        cfg = IPAMConfig(auto_allocate_blocks=True, strict_affinity=True)
+        result = Mock(spec=EtcdResult)
+        result.value = cfg.to_json()
+        self.m_etcd_client.read.return_value = result
+        self.assertEquals(self.client.get_ipam_config(), cfg)
+
+        # Test missing config returns the default.
+        cfg = IPAMConfig()
+        self.m_etcd_client.read.side_effect = EtcdKeyNotFound
+        self.assertEquals(self.client.get_ipam_config(), cfg)
+
+    def test_set_ipam_config(self):
+        """
+        Test set_ipam_config()
+        """
+        # Test no updates made if config has not actually changed.
+        cfg = IPAMConfig(auto_allocate_blocks=True)
+        cfg2 = IPAMConfig(auto_allocate_blocks=False, strict_affinity=True)
+        cfg3 = IPAMConfig(auto_allocate_blocks=False, strict_affinity=False)
+        result = Mock(spec=EtcdResult)
+        result.value = cfg.to_json()
+        self.m_etcd_client.read.return_value = result
+        self.client.set_ipam_config(cfg)
+        self.assertEquals(self.m_etcd_client.write.call_count, 0)
+
+        with patch("pycalico.ipam.BlockHandleReaderWriter._read_blocks",
+                   return_value=([BLOCK_V4_1], [])):
+            self.assertRaises(IPAMConfigConflictError,
+                              self.client.set_ipam_config,
+                              cfg2)
+
+        with patch("pycalico.ipam.BlockHandleReaderWriter._read_blocks",
+                   return_value=([], [BLOCK_V6_1])):
+            self.assertRaises(IPAMConfigConflictError,
+                              self.client.set_ipam_config,
+                              cfg2)
+
+        with patch("pycalico.ipam.BlockHandleReaderWriter._read_blocks",
+                   return_value=([], [])):
+            self.client.set_ipam_config(cfg2)
+            self.m_etcd_client.write.assert_called_once_with(IPAM_CONFIG_PATH,
+                                                             cfg2.to_json())
+
+        with patch("pycalico.ipam.BlockHandleReaderWriter._read_blocks",
+                   return_value=([], [])):
+            self.assertRaises(IPAMConfigConflictError,
+                              self.client.set_ipam_config,
+                              cfg3)
+
+    def test_ipam_config_operators(self):
+        """
+        Test IPAMConfig operators
+        """
+        cfg0 = IPAMConfig()
+        cfg1 = IPAMConfig(auto_allocate_blocks=True,
+                          strict_affinity=False)
+        cfg2 = IPAMConfig(auto_allocate_blocks=False,
+                          strict_affinity=False)
+        cfg3 = IPAMConfig(auto_allocate_blocks=True,
+                          strict_affinity=True)
+
+        self.assertEquals(cfg0, cfg1)
+        self.assertNotEquals(cfg0, cfg2)
+        self.assertNotEquals(cfg0, cfg3)
+
+        self.assertNotEquals(cfg0, "not a config object")
+        self.assertFalse(cfg0 == "not a config object")
+
+        self.assertTrue(isinstance(cfg0.__repr__(), str))
+
+    def test_ipam_config_from_json(self):
+        """
+        Test IPAMConfig.from_json() and IPAMConfig.to_json()
+        """
+        cfg0 = IPAMConfig.from_json('''{
+    "auto_allocate_blocks": false,
+    "strict_affinity": true
+}''')
+        self.assertTrue(cfg0.strict_affinity)
+        self.assertFalse(cfg0.auto_allocate_blocks)
+
+        cfg1 = IPAMConfig.from_json(cfg0.to_json())
+        self.assertEquals(cfg0, cfg1)
