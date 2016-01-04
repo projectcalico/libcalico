@@ -225,6 +225,14 @@ class TestRule(unittest.TestCase):
         assert_equal("allow icmp type 8 code 100 from cidr 10.0.0.0/8",
                      rule4.pprint())
 
+        rule5 = Rule(action="allow",
+                     protocol="icmpv6",
+                     icmp_code=100,
+                     icmp_type=128,
+                     src_net=IPNetwork("10/8"))
+        assert_equal("allow icmpv6 type 128 code 100 from cidr 10.0.0.0/8",
+                     rule5.pprint())
+
 
 class TestRules(unittest.TestCase):
 
