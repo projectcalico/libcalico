@@ -337,6 +337,7 @@ class AllocationBlock(object):
             # Release the addresses.
             for ordinal in ordinals:
                 self.allocations[ordinal] = None
+                self.unallocated.append(ordinal)
             return len(ordinals)
         else:
             # Nothing to release.

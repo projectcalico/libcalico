@@ -1049,6 +1049,15 @@ class TestIPAMClient(unittest.TestCase):
         self.m_etcd_client.delete.assert_called_once_with(m_resulth.key,
                                                           prevIndex=55555)
 
+        # Check the updated results, the IPs should not be allocated, and added
+        # to the end of the unallocated list.
+        block4 = AllocationBlock.from_etcd_result(m_resultb4)
+        block6 = AllocationBlock.from_etcd_result(m_resultb6)
+        self.assertIsNone(block4.allocations[13])
+        self.assertIsNone(block6.allocations[45])
+        self.assertEquals(block4.unallocated[-1], 13)
+        self.assertEquals(block6.unallocated[-1], 45)
+
     def test_release_ip_by_handle_no_block(self):
         """
         Test of release_ip_by_handle when referenced block does not exist.
