@@ -621,6 +621,20 @@ class TestAllocationBlock(unittest.TestCase):
         assert_raises(AddressNotAssignedError,
                       block0.get_attributes_for_ip, ip1)
 
+    def test_release_by_handle(self):
+        """
+        Mainline test for release_by_handle()
+        """
+        block = _test_block_not_empty_v4()
+        block.release_by_handle("key1")
+
+        # Check allocations indicate the IPs are now released.
+        assert_is_none(block.allocations[2])
+        assert_is_none(block.allocations[4])
+
+        # Check that the unallocated list has the released ordinals appended.
+        assert_list_equal(block.unallocated[-2:], [2, 4])
+
 
 class TestGetBlockCIDRForAddress(unittest.TestCase):
 
