@@ -407,7 +407,8 @@ class Rule(dict):
             value = IPNetwork(value)
         if key == "action" and value not in ("allow", "deny"):
             raise ValueError("'%s' is not allowed for key 'action'" % value)
-        if key == "protocol" and value not in ("tcp", "udp", "icmp", None):
+        if (key == "protocol" and
+            value not in ("tcp", "udp", "icmp", "icmpv6", None)):
             raise ValueError("'%s' is not allowed for key 'protocol'" % value)
         if key in ("src_tag", "dst_tag") and not validate_characters(value):
             raise ValueError("'%s' is not allowed for key '%s'" % (value, key))

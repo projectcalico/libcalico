@@ -142,7 +142,7 @@ def validate_icmp_type(icmp_type):
     Validate that icmp_type is an integer between 0 and 255.
     If not return False.
 
-    :param icmp_type:
+    :param icmp_type: int value representing an icmp type
     :return: Boolean: True if valid icmp type, False if not
     """
     try:
