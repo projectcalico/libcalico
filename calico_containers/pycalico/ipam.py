@@ -185,11 +185,16 @@ class BlockHandleReaderWriter(DatastoreClient):
                 return
 
             # Some other host beat us to claiming this block.  Clean up.
-            self.etcd_client.delete(key)
+            try:
+                self.etcd_client.delete(key)
+            except EtcdKeyNotFound:
+                # A race exists where another process on the same host could
+                # have already deleted the key. This is fine as long as the key
+                # no longer exists.
+                pass
 
             # Throw a key error to let the caller know the block wasn't free
             # after all.
-
             raise HostAffinityClaimedError("Block %s already claimed by %s",
                                            block_id, block.host_affinity)
         # successfully created the block.  Done.
