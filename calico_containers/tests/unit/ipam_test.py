@@ -21,7 +21,7 @@ from etcd import EtcdResult, Client, EtcdAlreadyExist, EtcdKeyNotFound, EtcdComp
 
 from pycalico.ipam import (IPAMClient, BlockHandleReaderWriter,
                            CASError, NoFreeBlocksError, _block_datastore_key,
-                           _handle_datastore_key)
+                           _handle_datastore_key, HostAffinityClaimedError)
 from pycalico.datastore_errors import PoolNotFound
 from pycalico.block import AllocationBlock, AddressNotAssignedError, BLOCK_SIZE
 from pycalico.handle import AllocationHandle, AddressCountTooLow
@@ -1311,6 +1311,48 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
                                                    call(key, value,
                                                         prevExist=False)])
         self.m_etcd_client.read.assert_called_once_with(key, quorum=True)
+
+    def test_claim_block_affinity_already_deleted(self):
+        """
+        Test _claim_block_affinity() when another process deletes the host
+        affinity under our feet.
+        This can occur when the block gets claimed by one host and a second
+        host has two competing processes trying to claim the block. They can
+        both try to clean up at the same time.
+
+        Order of events
+        1 Write host affinity
+        2 Try to write the new block, but this fails
+        3 Re-read the block, discover another host owns it
+        4 Delete key from 1 but find it's already removed.
+        """
+
+        block = _test_block_empty_v4()
+        m_result0 = Mock(spec=EtcdResult)
+        m_result0.value = block.to_json()
+
+        block_our_host = AllocationBlock(BLOCK_V4_1, "test_host2")
+
+        # Reads at 3
+        self.m_etcd_client.read.return_value = m_result0
+
+        # Write at 1, 2
+        self.m_etcd_client.write.side_effect = [None, EtcdAlreadyExist()]
+
+        # Delete at 4
+        self.m_etcd_client.delete.side_effect = [EtcdKeyNotFound()]
+
+        with self.assertRaises(HostAffinityClaimedError):
+            self.client._claim_block_affinity(block_our_host.host_affinity,
+                                              block.cidr)
+
+        key = _block_datastore_key(block_our_host.cidr)
+        value = block_our_host.to_json()
+        self.m_etcd_client.write.assert_has_calls([call(ANY, ""),
+                                                   call(key, value,
+                                                        prevExist=False)])
+        self.m_etcd_client.read.assert_called_once_with(key, quorum=True)
+        self.m_etcd_client.delete.assert_called_once_with(ANY)
 
     def test_new_affine_block_race(self):
         """
