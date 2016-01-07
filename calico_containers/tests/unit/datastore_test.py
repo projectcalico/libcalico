@@ -1721,12 +1721,7 @@ class TestDatastoreClient(unittest.TestCase):
 
     def test_get_host_bgp_ips(self):
         """
-        Check etcd for the configured IPv4 and IPv6 addresses for the specified
-        host BGP binding. If it hasn't been configured yet, raise an
-        EtcdKeyNotFound.
-
-        :param hostname: The hostname.
-        :return: A tuple containing the IPv4 and IPv6 address.
+        Mainline test of get_host_bgp_ips().
         """
         def mock_read(path):
             if path == TEST_BGP_HOST_IPV4_PATH:
@@ -1745,16 +1740,24 @@ class TestDatastoreClient(unittest.TestCase):
 
     def test_get_host_bgp_ips_not_found(self):
         """
-        Check etcd for the configured IPv4 and IPv6 addresses for the specified
-        host BGP binding. If it hasn't been configured yet, raise an
-        EtcdKeyNotFound.
-
-        :param hostname: The hostname.
-        :return: A tuple containing the IPv4 and IPv6 address.
+        Test of get_host_bgp_ips() when not configured.
         """
         self.etcd_client.read.side_effect = EtcdKeyNotFound
 
         assert_raises(KeyError, self.datastore.get_host_bgp_ips, TEST_HOST)
+
+    def test_get_host_as(self):
+        """
+        Check get_host_as() returns the AS number when configured and None
+        when inheriting the default.
+        """
+        result = Mock(spec=EtcdResult)
+        result.value = "1234"
+        self.etcd_client.read.return_value = result
+        assert_equal(self.datastore.get_host_as(TEST_HOST), "1234")
+
+        self.etcd_client.read.side_effect = EtcdKeyNotFound
+        assert_equal(self.datastore.get_host_as(TEST_HOST), None)
 
 
 class TestSecureDatastoreClient(unittest.TestCase):
