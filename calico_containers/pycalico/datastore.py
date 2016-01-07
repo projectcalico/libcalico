@@ -357,6 +357,23 @@ class DatastoreClient(object):
             return (ipv4, ipv6)
 
     @handle_errors
+    def get_host_as(self, hostname):
+        """
+        Query the host AS number.
+
+        :param hostname: The hostname.
+        :return: The host AS number, or None if the host is inheriting the
+        global default node AS number.
+        """
+        bgp_as = BGP_HOST_AS_PATH  % {"hostname": hostname}
+        try:
+            as_num = self.etcd_client.read(bgp_as).value
+        except EtcdKeyNotFound:
+            return None
+        else:
+            return as_num
+
+    @handle_errors
     def get_ip_pools(self, version, ipam=None):
         """
         Get the configured IP pools.
