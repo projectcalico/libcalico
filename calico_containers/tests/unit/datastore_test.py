@@ -911,6 +911,35 @@ class TestDatastoreClient(unittest.TestCase):
                                                 any_order=True)
         assert_equal(self.etcd_client.write.call_count, 6)
 
+    def test_get_per_host_config_mainline(self):
+        value = self.datastore.get_per_host_config("hostname", "SomeConfig")
+        assert_equal(value, self.etcd_client.read.return_value.value)
+        assert_equal(self.etcd_client.read.mock_calls,
+                     [call("/calico/v1/host/hostname/config/SomeConfig")])
+
+    def test_get_per_host_config_not_exist(self):
+        self.etcd_client.read.side_effect = EtcdKeyNotFound
+        value = self.datastore.get_per_host_config("hostname", "SomeConfig")
+        assert_is_none(value)
+
+    def test_set_per_host_config_mainline(self):
+        self.datastore.set_per_host_config("hostname", "SomeConfig", "foo")
+        assert_equal(self.etcd_client.write.mock_calls,
+                     [call("/calico/v1/host/hostname/config/SomeConfig",
+                           "foo")])
+
+    def test_set_per_host_config_none(self):
+        # This exception should be suppressed
+        self.etcd_client.delete.side_effect = EtcdKeyNotFound
+        self.datastore.set_per_host_config("hostname", "SomeConfig", None)
+        assert_equal(self.etcd_client.delete.mock_calls,
+                     [call("/calico/v1/host/hostname/config/SomeConfig")])
+
+    def test_remove_per_host_config_none(self):
+        self.datastore.remove_per_host_config("hostname", "SomeConfig")
+        assert_equal(self.etcd_client.delete.mock_calls,
+                     [call("/calico/v1/host/hostname/config/SomeConfig")])
+
     def test_remove_host_mainline(self):
         """
         Test remove_host() when the key exists.
