@@ -43,6 +43,8 @@ CONFIG_PATH = CALICO_V_PATH + "/config/"
 CONFIG_IF_PREF_PATH = CONFIG_PATH + "InterfacePrefix"
 HOSTS_PATH = CALICO_V_PATH + "/host/"
 HOST_PATH = HOSTS_PATH + "%(hostname)s/"
+HOST_CONFIG_PATH = HOST_PATH + "config/"
+HOST_CONFIG_KEY_PATH = HOST_CONFIG_PATH + "%(config_param)s"
 ORCHESTRATOR_PATH = HOST_PATH + "workload/%(orchestrator_id)s/"
 WORKLOAD_PATH = ORCHESTRATOR_PATH + "%(workload_id)s/"
 LOCAL_ENDPOINTS_PATH = WORKLOAD_PATH + "endpoint/"
@@ -280,13 +282,62 @@ class DatastoreClient(object):
         # This is important for Mesos, where the containerized executor process
         # needs to exchange messages with the Mesos Slave process running on
         # the host.
-        self.etcd_client.write(host_path +
-                               "config/DefaultEndpointToHostAction", "RETURN")
+        self.set_per_host_config(hostname, "DefaultEndpointToHostAction",
+                                 "RETURN")
 
-        # Flag to Felix that the host is created.
-        self.etcd_client.write(host_path + "config/marker", "created")
+        # Flag that the host is created.
+        self.set_per_host_config(hostname, "marker", "created")
 
         return
+
+    @handle_errors
+    def get_per_host_config(self, hostname, config_param):
+        """
+        Get a raw (string) per-host config parameter from etcd.
+        :param hostname: The name of the host.
+        :param config_param: The name of the config parameter (e.g.
+               "LogSeverityFile").
+        :return: string value or None if config wasn't present.
+        """
+        config_key = HOST_CONFIG_KEY_PATH % {
+            "hostname": hostname,
+            "config_param": config_param,
+        }
+        try:
+            return self.etcd_client.read(config_key).value
+        except EtcdKeyNotFound:
+            return None
+
+    @handle_errors
+    def set_per_host_config(self, hostname, config_param, value):
+        """
+        Write a raw (string) per-host config parameter to etcd.
+        :param hostname: The name of the host who's config should be updated.
+        :param config_param: The name of the parameter (e.g.
+               "LogSeverityFile").
+        :param value: The raw string value to set, or None to delete the key.
+        """
+        config_key = HOST_CONFIG_KEY_PATH % {
+            "hostname": hostname,
+            "config_param": config_param,
+        }
+        if value is not None:
+            self.etcd_client.write(config_key, value)
+        else:
+            try:
+                self.etcd_client.delete(config_key)
+            except EtcdKeyNotFound:
+                pass
+
+    @handle_errors
+    def remove_per_host_config(self, hostname, config_param):
+        """
+        Remove a per-host config parameter.
+        :param hostname: The name of the host who's config should be updated.
+        :param config_param: The name of the parameter (e.g.
+               "LogSeverityFile").
+        """
+        self.set_per_host_config(hostname, config_param, None)
 
     @handle_errors
     def remove_host(self, hostname):
