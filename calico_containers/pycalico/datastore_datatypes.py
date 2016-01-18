@@ -440,6 +440,13 @@ class Rule(dict):
             json_dict["dst_net"] = str(json_dict["dst_net"])
         if "src_net" in json_dict:
             json_dict["src_net"] = str(json_dict["src_net"])
+
+        # Convert ports to integers.
+        if "dst_ports" in json_dict:
+            json_dict["dst_ports"] = [int(p) for p in json_dict["dst_ports"]]
+        if "src_ports" in json_dict:
+            json_dict["src_ports"] = [int(p) for p in json_dict["src_ports"]]
+
         return json_dict
 
     def pprint(self):
