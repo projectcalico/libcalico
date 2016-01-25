@@ -25,8 +25,3 @@ RUN apt-get update && \
 ADD build-requirements.txt /code/
 RUN pip install setuptools==0.7.7
 RUN pip install -r build-requirements.txt
-
-# Can't run pyinstaller as root so add a user - https://github.com/pyinstaller/pyinstaller/issues/1081
-RUN useradd -d /home/user -m -s /bin/bash user
-RUN chown -R user:user /code/
-USER user
