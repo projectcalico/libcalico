@@ -17,14 +17,16 @@ MAINTAINER Tom Denham <tom@projectcalico.org>
 WORKDIR /code/
 
 RUN apt-get update && \
-    apt-get install -qy curl python-dev python-pip git libffi-dev libssl-dev
-
-# Make an etcd available as some UTs rely on it.
-RUN curl -L  https://www.github.com/coreos/etcd/releases/download/v2.0.10/etcd-v2.0.10-linux-amd64.tar.gz -o /tmp/etcd.tar.gz
-RUN tar -zxvf /tmp/etcd.tar.gz -C /tmp --strip-components=1
+    apt-get install -qy python-dev python-pip git libffi-dev libssl-dev procps
 
 # Install the python packages needed for running UTs and building calicoctl.
 # Git is installed to allow pip installation from a github repo and also so
 # that the right branch can be included if uploading coverage.
-ADD requirements.txt /code/
-RUN pip install -r requirements.txt
+ADD build-requirements.txt /code/
+RUN pip install setuptools==0.7.7
+RUN pip install -r build-requirements.txt
+
+# Can't run pyinstaller as root so add a user - https://github.com/pyinstaller/pyinstaller/issues/1081
+RUN useradd -d /home/user -m -s /bin/bash user
+RUN chown -R user:user /code/
+USER user

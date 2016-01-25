@@ -2,7 +2,7 @@
 
 SRCDIR=calico_containers
 PYCALICO=$(wildcard $(SRCDIR)/pycalico/*.py)
-BUILD_FILES=Dockerfile requirements.txt
+BUILD_FILES=Dockerfile build-requirements.txt
 
 WHEEL_VERSION=0.1.0
 
