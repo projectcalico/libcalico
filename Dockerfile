@@ -25,5 +25,5 @@ RUN apt-get update && \
 ADD build-requirements.txt /code/
 RUN pip install setuptools==0.7.7
 RUN pip install -r build-requirements.txt
-ADD . /code
-RUN pip install -e /code
+ADD . /tmp/pycalico
+RUN pip install /tmp/pycalico
