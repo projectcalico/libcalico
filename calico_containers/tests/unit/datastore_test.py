@@ -32,6 +32,7 @@ from pycalico.datastore_errors import DataStoreError, ProfileNotInEndpoint, Prof
     MultipleEndpointsMatch
 from pycalico.datastore_datatypes import Rules, BGPPeer, IPPool, \
     Endpoint, Profile, Rule
+from pycalico.block import AddressRangeNotAllowedError
 
 TEST_HOST = "TEST_HOST"
 TEST_ORCH_ID = "docker"
@@ -489,6 +490,28 @@ class TestIPPool(unittest.TestCase):
         """
         assert_equal("1.2.3.0/24",
                       str(IPPool("1.2.3.4/24", ipip=True, masquerade=True)))
+
+    def test_init(self):
+        """
+        Test __init__ allows correct IPPools
+        """
+        bad_cidr1 = "10.10.10.10/32"
+        bad_cidr2 = "172.25.20.0/30"
+        bad_cidr3 = "ffff::/128"
+        good_cidr1 = "10.10.10.10/24"
+        good_cidr2 = "ffff::/120"
+        self.assertRaises(AddressRangeNotAllowedError,
+                          IPPool, bad_cidr1, ipam=True)
+        self.assertRaises(AddressRangeNotAllowedError,
+                          IPPool, bad_cidr2, ipam=True)
+        self.assertRaises(AddressRangeNotAllowedError,
+                          IPPool, bad_cidr3, ipam=True)
+        try:
+            IPPool(good_cidr1, ipam=True)
+            IPPool(good_cidr2, ipam=True)
+            IPPool(bad_cidr1, ipam=False)
+        except AddressRangeNotAllowedError:
+            self.fail("Received unexpected AddressRangeNotAllowedError")
 
 
 class TestDatastoreClient(unittest.TestCase):

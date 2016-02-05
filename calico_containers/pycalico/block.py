@@ -543,3 +543,9 @@ class AddressNotAssignedError(BlockError):
     Tried to query an address that isn't assigned.
     """
     pass
+
+class AddressRangeNotAllowedError(BlockError):
+    """
+    Tried to assign an address range that does not fit a block size.
+    """
+    pass

@@ -24,6 +24,7 @@ from netaddr import IPAddress, IPNetwork
 
 from pycalico.util import generate_cali_interface_name, validate_characters, \
     validate_ports, validate_icmp_type
+from pycalico.block import AddressRangeNotAllowedError, BLOCK_PREFIXLEN
 
 
 IF_PREFIX = "cali"
@@ -126,16 +127,26 @@ class IPPool(object):
     def __init__(self, cidr, ipip=False, masquerade=False, ipam=True):
         """
         Constructor.
-        :param cidr: IPNetwork object (or CIDR string) representing the pool
+        :param cidr: IPNetwork object (or CIDR string) representing the pool.
+            NOTE: When used by Calico IPAM, an IPPool's cidr prefix must have a
+            length equal to or smaller than an IPAM block, such as /24 if the
+            IPAM block size is /26.
         :param ipip: Use IP-IP for this pool.
         :param masquerade: Enable masquerade (outgoing NAT) for this pool.
         :param ipam: Whether this IPPool is used by Calico IPAM.
         """
         # Normalize the CIDR (e.g. 1.2.3.4/16 -> 1.2.0.0/16)
         self.cidr = IPNetwork(cidr).cidr
+        self.ipam = bool(ipam)
+        if self.ipam:
+            if self.cidr.prefixlen > BLOCK_PREFIXLEN[self.cidr.version]:
+                raise AddressRangeNotAllowedError("The cidr block size for an "
+                    "ipv%s IPPool must have a prefix length of %s or lower. "
+                    "Given: %s" % (self.cidr.version,
+                                   BLOCK_PREFIXLEN[self.cidr.version],
+                                   self.cidr.prefixlen))
         self.ipip = bool(ipip)
         self.masquerade = bool(masquerade)
-        self.ipam = bool(ipam)
 
     def to_json(self):
         """
