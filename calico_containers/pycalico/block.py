@@ -543,3 +543,9 @@ class AddressNotAssignedError(BlockError):
     Tried to query an address that isn't assigned.
     """
     pass
+
+class CidrTooSmallError(BlockError):
+    """
+    Tried to assign a CIDR that is too small to fit in an IP block.
+    """
+    pass
