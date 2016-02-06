@@ -544,8 +544,8 @@ class AddressNotAssignedError(BlockError):
     """
     pass
 
-class AddressRangeNotAllowedError(BlockError):
+class CidrTooSmallError(BlockError):
     """
-    Tried to assign an address range that does not fit a block size.
+    Tried to assign a CIDR that is too small to fit in an IP block.
     """
     pass

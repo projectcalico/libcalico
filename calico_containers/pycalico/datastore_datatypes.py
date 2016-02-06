@@ -24,7 +24,7 @@ from netaddr import IPAddress, IPNetwork
 
 from pycalico.util import generate_cali_interface_name, validate_characters, \
     validate_ports, validate_icmp_type
-from pycalico.block import AddressRangeNotAllowedError, BLOCK_PREFIXLEN
+from pycalico.block import CidrTooSmallError, BLOCK_PREFIXLEN
 
 
 IF_PREFIX = "cali"
@@ -140,11 +140,12 @@ class IPPool(object):
         self.ipam = bool(ipam)
         if self.ipam:
             if self.cidr.prefixlen > BLOCK_PREFIXLEN[self.cidr.version]:
-                raise AddressRangeNotAllowedError("The cidr block size for an "
-                    "ipv%s IPPool must have a prefix length of %s or lower. "
-                    "Given: %s" % (self.cidr.version,
-                                   BLOCK_PREFIXLEN[self.cidr.version],
-                                   self.cidr.prefixlen))
+                raise CidrTooSmallError("The CIDR block size for an "
+                    "IPv%s pool when using Calico IPAM must have a prefix "
+                    "length of %s or lower. Given: %s" %
+                    (self.cidr.version,
+                     BLOCK_PREFIXLEN[self.cidr.version],
+                     self.cidr.prefixlen))
         self.ipip = bool(ipip)
         self.masquerade = bool(masquerade)
 
