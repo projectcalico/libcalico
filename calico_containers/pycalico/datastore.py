@@ -22,7 +22,7 @@ from etcd import EtcdKeyNotFound, EtcdException, EtcdNotFile, EtcdKeyError
 from netaddr import IPNetwork, IPAddress, AddrFormatError
 
 from pycalico.datastore_datatypes import Rules, BGPPeer, IPPool, \
-    Endpoint, Profile, Rule, IF_PREFIX, IPAMConfig
+    Endpoint, Profile, Rule, IF_PREFIX, IPAMConfig, Policy
 from pycalico.datastore_errors import DataStoreError, \
     ProfileNotInEndpoint, ProfileAlreadyInEndpoint, MultipleEndpointsMatch
 from pycalico.util import get_hostname, validate_hostname_port
@@ -53,6 +53,8 @@ PROFILES_PATH = CALICO_V_PATH + "/policy/profile/"
 PROFILE_PATH = PROFILES_PATH + "%(profile_id)s/"
 TAGS_PATH = PROFILE_PATH + "tags"
 RULES_PATH = PROFILE_PATH + "rules"
+TIER_PATH = CALICO_V_PATH + "/policy/tier/%(tier_name)s"
+POLICY_PATH = TIER_PATH + "/policy/%(policy_name)s/"
 IP_POOLS_PATH = CALICO_V_PATH + "/ipam/v%(version)s/pool/"
 IP_POOL_KEY = IP_POOLS_PATH + "%(pool)s"
 
@@ -586,7 +588,7 @@ class DatastoreClient(object):
         # If IP in IP is enabled on the pool, ensure that it is enabled
         # globally.
         if pool.ipip:
-            # Attempt to read existing config and enable ipip if 
+            # Attempt to read existing config and enable ipip if
             # etcd is empty or ipip is disabled.
             try:
                 result = self.etcd_client.read(IP_IN_IP_PATH)
@@ -722,7 +724,159 @@ class DatastoreClient(object):
             return True
 
     @handle_errors
-    def create_profile(self, name, rules=None):
+    def policy_exists(self, tier_name, policy_name):
+        """
+        Check if a policy exists.
+
+        :param tier_name: The name of the tier in which to search
+        for this policy.
+        :param policy_name: The name of the policy to search for.
+        :return: True if the profile exists, false otherwise.
+        """
+        profile_path = POLICY_PATH % {"tier_name": tier_name,
+                                      "policy_name": policy_name}
+        try:
+            _ = self.etcd_client.read(profile_path)
+        except EtcdKeyNotFound:
+            return False
+        else:
+            return True
+
+    def set_policy_tier_metadata(self, tier_name, metadata):
+        """
+        Creates the metadata for the given policy tier.  If
+        a tier with this name already exists it will be overwritten. If
+        no tier with this name exists it will be created.
+
+        :param tier_name: Name of the tier to create.
+        :param order: Order to apply to this tier.  Lower orders
+        take precedence.
+        :param metadata: Metadata to apply to this tier.
+        :return: None
+        """
+        path = TIER_PATH % {"tier_name": tier_name}
+        self.etcd_client.write(path + "/metadata", json.dumps(metadata))
+
+    def get_policy_tier_metadata(self, tier_name):
+        """
+        Retrieves the metadata for the given policy tier if it exists.
+        If no tier with the given name exists, a KeyError is raised.
+
+        :param tier_name: Name of the tier for which to get metadata.
+        :return: Dictionary of tier metadata.
+        """
+        path = TIER_PATH % {"tier_name": tier_name}
+        try:
+            result = self.etcd_client.read(path + "/metadata")
+            metadata = json.loads(result.value)
+        except EtcdKeyNotFound:
+            raise KeyError("Tier '%s' does not exist" % tier_name)
+        else:
+            return metadata
+
+    def delete_policy_tier(self, tier_name):
+        """
+        Deletes the policy tier with the given name and any
+        policies within it.
+
+        Raises KeyError if no tier exists with the given name.
+
+        :param tier_name: Name of the tier to delete.
+        :return: None
+        """
+        path = TIER_PATH % {"tier_name": tier_name}
+        try:
+            self.etcd_client.delete(path, recursive=True, dir=True)
+        except EtcdKeyNotFound:
+            raise KeyError("Tier '%s' does not exist" % tier_name)
+
+    @handle_errors
+    def create_policy(self, tier_name, policy_name, selector,
+                      order=None, rules=None):
+        """
+        Creates a policy with a given group, name, selector, and rules,
+        and stores it in the Calico data store.
+
+        If no rules are specified, the created policy will allow to and from
+        all sources.
+
+        If no order is specified, an order of 100 will be assigned.
+
+        :param tier_name: name of the tier in which to create this policy.
+        :param policy_name: name of the policy to create.
+        :return: Policy object.
+        """
+        policy_path = POLICY_PATH % {"tier_name": tier_name,
+                                     "policy_name": policy_name}
+        default_allow = Rule(action="allow")
+        rules = rules or Rules(id=policy_name,
+                               inbound_rules=[default_allow],
+                               outbound_rules=[default_allow])
+        order = order or 100
+
+        # Create the Policy object.
+        policy = Policy(tier_name, policy_name)
+        policy.rules = rules
+        policy.selector = selector
+        policy.order = order
+
+        # Write the profile to the data store.
+        self.update_policy(policy)
+        return policy
+
+    @handle_errors
+    def update_policy(self, policy):
+        """
+        Write the policy to the data store.  This creates the
+        policy if it doesn't exist and is idempotent.
+        :param policy: The Policy object to update.
+        :return: None
+        """
+        policy_path = POLICY_PATH % {"tier_name": policy.tier_name,
+                                     "policy_name": policy.policy_name}
+        self.etcd_client.write(policy_path, policy.to_json())
+
+    @handle_errors
+    def get_policy(self, tier_name, policy_name):
+        """
+        Returns the policy with a given group and name.
+
+        :param tier_name: name of the tier from which to get this policy.
+        :param policy_name: name of the policy to retrieve.
+        :return: nothing.
+        """
+        policy_path = POLICY_PATH % {"tier_name": tier_name,
+                                     "policy_name": policy_name}
+        try:
+            result = self.etcd_client.read(policy_path)
+            policy = Policy(tier_name, policy_name)
+            policy.selector = result["selector"]
+            policy.rules = result["rules"]
+        except EtcdKeyNotFound:
+            raise KeyError("%s/%s is not a configured policy." % \
+                    (tier_name, policy_name))
+        else:
+            return policy
+
+    @handle_errors
+    def remove_policy(self, tier_name, policy_name):
+        """
+        Delete a policy with a given group / name and any subtrees.
+
+        :param tier_name: name of the tier from which to delete this policy.
+        :param policy_name: name of the policy to delete.
+        :return: nothing.
+        """
+        profile_path = POLICY_PATH % {"tier_name": tier_name,
+                                      "policy_name": policy_name}
+        try:
+            self.etcd_client.delete(profile_path, recursive=True, dir=True)
+        except EtcdKeyNotFound:
+            raise KeyError("%s/%s is not a configured policy."
+                           % (tier_name, policy_name))
+
+    @handle_errors
+    def create_profile(self, name, rules=None, labels=None):
         """
         Create a policy profile.  By default, endpoints in a profile
         accept traffic only from other endpoints in that profile, but can send
@@ -738,6 +892,10 @@ class DatastoreClient(object):
         """
         profile_path = PROFILE_PATH % {"profile_id": name}
         self.etcd_client.write(profile_path + "tags", '["%s"]' % name)
+
+        # Write any labels.
+        labels = labels or {}
+        self.etcd_client.write(profile_path + "labels", json.dumps(labels))
 
         # Accept inbound traffic from self, allow outbound traffic to anywhere.
         # Note: We do not need to add a default_deny to outbound packet traffic

@@ -286,6 +286,7 @@ class TestEndpoint(unittest.TestCase):
                     "name": "caliaabbccddeef",
                     "mac": "11-22-33-44-55-66",
                     "profile_ids": [],
+                    "labels": {},
                     "ipv4_nets": [],
                     "ipv6_nets": [],
                     "ipv4_gateway": None,
