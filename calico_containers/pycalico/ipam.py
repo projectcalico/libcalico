@@ -18,6 +18,7 @@ from netaddr import IPAddress, IPNetwork
 import logging
 import random
 
+from pycalico.datastore import handle_errors
 from pycalico.datastore_datatypes import IPPool
 from pycalico.datastore import DatastoreClient
 from pycalico.datastore import (IPAM_HOST_AFFINITY_PATH,
@@ -51,6 +52,7 @@ class BlockHandleReaderWriter(DatastoreClient):
     class.
     """
 
+    @handle_errors
     def _read_block(self, block_cidr):
         """
         Read the block from the data store.
@@ -68,6 +70,7 @@ class BlockHandleReaderWriter(DatastoreClient):
         block = AllocationBlock.from_etcd_result(result)
         return block
 
+    @handle_errors
     def _compare_and_swap_block(self, block):
         """
         Write the block using an atomic Compare-and-swap.
@@ -89,6 +92,7 @@ class BlockHandleReaderWriter(DatastoreClient):
             except EtcdAlreadyExist:
                 raise CASError(str(block.cidr))
 
+    @handle_errors
     def _get_affine_blocks(self, host, version, pool):
         """
         Get the blocks for which this host has affinity.
@@ -121,6 +125,7 @@ class BlockHandleReaderWriter(DatastoreClient):
 
         return block_ids
 
+    @handle_errors
     def _new_affine_block(self, host, version, pool):
         """
         Create and register a new affine block for the host.
@@ -160,6 +165,7 @@ class BlockHandleReaderWriter(DatastoreClient):
                     return block_cidr
         raise NoFreeBlocksError()
 
+    @handle_errors
     def _claim_block_affinity(self, host, block_cidr):
         """
         Claim a block we think is free.
@@ -294,6 +300,7 @@ class BlockHandleReaderWriter(DatastoreClient):
                 return
         raise RuntimeError("Max retries hit.")  # pragma: no cover
 
+    @handle_errors
     def _read_handle(self, handle_id):
         """
         Read the handle with the given handle ID from the data store.
@@ -308,6 +315,7 @@ class BlockHandleReaderWriter(DatastoreClient):
         handle = AllocationHandle.from_etcd_result(result)
         return handle
 
+    @handle_errors
     def _compare_and_swap_handle(self, handle):
         """
         Write the handle using an atomic Compare-and-swap.
