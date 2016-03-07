@@ -150,3 +150,44 @@ def validate_icmp_type(icmp_type):
     except ValueError:
         valid = False
     return valid
+
+def validate_hostname_port(hostname_port):
+    """
+    Validate the hostname and port format.  (<HOSTNAME>:<PORT>)
+    An IPv4 address is a valid hostname.
+
+    :return: Boolean: True if valid, False if invalid
+    """
+    # Should contain a single ":" separating hostname and port
+    hostname_port = hostname_port.split(":")
+    if len(hostname_port) != 2:
+        return False
+
+    # Check the hostname format.
+    if not validate_hostname(hostname_port[0]):
+        return False
+
+    # Check port range.
+    try:
+        port = int(hostname_port[1])
+    except ValueError:
+        return False
+    else:
+        return 1 <= port <= 65535
+
+def validate_hostname(hostname):
+    """
+    Validate a hostname string.  This allows standard hostnames and IPv4
+    addresses.
+
+    :param hostname: The hostname to validate.
+    :return: Boolean: True if valid, False if invalid
+    """
+    # Hostname length is limited.
+    if len(hostname) > 255:
+        return False
+
+    # Hostname labels may consist of numbers, letters and hyphens, but may not
+    # end or begin with a hyphen.
+    allowed = re.compile("(?!-)[a-z\d-]{1,63}(?<!-)$", re.IGNORECASE)
+    return all(allowed.match(x) for x in hostname.split("."))
