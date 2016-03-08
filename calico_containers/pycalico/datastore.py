@@ -25,7 +25,7 @@ from pycalico.datastore_datatypes import Rules, BGPPeer, IPPool, \
     Endpoint, Profile, Rule, IF_PREFIX
 from pycalico.datastore_errors import DataStoreError, \
     ProfileNotInEndpoint, ProfileAlreadyInEndpoint, MultipleEndpointsMatch
-from pycalico.util import get_hostname
+from pycalico.util import get_hostname, validate_hostname_port
 
 ETCD_AUTHORITY_DEFAULT = "127.0.0.1:2379"
 ETCD_AUTHORITY_ENV = "ETCD_AUTHORITY"
@@ -134,8 +134,12 @@ class DatastoreClient(object):
 
     def __init__(self):
         etcd_authority = os.getenv(ETCD_AUTHORITY_ENV, ETCD_AUTHORITY_DEFAULT)
-        (host, port) = etcd_authority.split(":", 1)
+        if not validate_hostname_port(etcd_authority):
+            raise DataStoreError("Invalid %s. It must take the form "
+                                 "<address>:<port>. Value provided is '%s'" %
+                                 (ETCD_AUTHORITY_ENV, etcd_authority))
 
+        (host, port) = etcd_authority.split(":", 1)
         etcd_scheme = os.getenv(ETCD_SCHEME_ENV, ETCD_SCHEME_DEFAULT)
         etcd_key = os.getenv(ETCD_KEY_FILE_ENV, '')
         etcd_cert = os.getenv(ETCD_CERT_FILE_ENV, '')
