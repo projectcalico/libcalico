@@ -260,7 +260,9 @@ class TestUtil(unittest.TestCase):
         ('validhostname:65535', True),
         ('#notvalidhostname:65535', False),
         ('verylong' * 100 + ':200', False),
-        ('12.256.122.43:aaa', False)
+        ('12.256.122.43:aaa', False),
+        (12345, False),
+        (("1.2.3.244:256",), False)
     ])
     def test_validate_hostname_port(self, input_string, expected_result):
         """
