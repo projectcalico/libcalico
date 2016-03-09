@@ -2,8 +2,12 @@ import socket
 import sys
 import os
 import re
+import logging
 from netaddr import IPNetwork
 from subprocess import check_output, CalledProcessError
+
+_log = logging.getLogger(__name__)
+_log.addHandler(logging.NullHandler())
 
 HOSTNAME_ENV = "HOSTNAME"
 
@@ -150,3 +154,62 @@ def validate_icmp_type(icmp_type):
     except ValueError:
         valid = False
     return valid
+
+def validate_hostname_port(hostname_port):
+    """
+    Validate the hostname and port format.  (<HOSTNAME>:<PORT>)
+    An IPv4 address is a valid hostname.
+
+    :return: Boolean: True if valid, False if invalid
+    """
+    # Should contain a single ":" separating hostname and port
+    if not isinstance(hostname_port, str):
+        _log.error("Must provide string for hostname:port validation, not: %s" % type(hostname_port))
+        return False
+
+    try:
+        (hostname, port) = hostname_port.split(":")
+    except ValueError:
+        _log.error("Must provide a string splittable by ':' for hostname-port.")
+        return False
+
+    # Check the hostname format.
+    if not validate_hostname(hostname):
+        return False
+
+    # Check port range.
+    try:
+        port = int(port)
+    except ValueError:
+        _log.error("Port must be an integer.")
+        return False
+    if port < 1 or port > 65535:
+        _log.error("Provided port (%d) must be between 1 and 65535." % port)
+        return False
+    return True
+
+def validate_hostname(hostname):
+    """
+    Validate a hostname string.  This allows standard hostnames and IPv4
+    addresses.
+
+    :param hostname: The hostname to validate.
+    :return: Boolean: True if valid, False if invalid
+    """
+    # Hostname length is limited.
+    if not isinstance(hostname, str):
+        _log.error("Hostname must be a string, not %s" % type(hostname))
+        return False
+    hostname_len = len(hostname)
+    if hostname_len > 255:
+        _log.error("Hostname length (%d) should be less than 255 characters." % hostname_len)
+        return False
+
+    # Hostname labels may consist of numbers, letters and hyphens, but may not
+    # end or begin with a hyphen.
+    allowed = re.compile("(?!-)[a-z\d-]{1,63}(?<!-)$", re.IGNORECASE)
+    if not all(allowed.match(x) for x in hostname.split(".")):
+        _log.error("Hostname label may only consist of numbers, letters, and "
+                   "hyphens (but may not end or begin with a hyphen.")
+        return False
+    return True
