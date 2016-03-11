@@ -76,8 +76,10 @@ BGP_HOST_AS_PATH = BGP_HOST_PATH + "as_num"
 BGP_HOST_PEERS_PATH = BGP_HOST_PATH + "peer_v%(version)s/"
 BGP_HOST_PEER_PATH = BGP_HOST_PATH + "peer_v%(version)s/%(peer_ip)s"
 
-# Grabs hostname from etcd datastore key
-HOSTNAME_DATASTORE_RE = re.compile(BGP_HOSTS_PATH + "(.*)/ip_addr_v[46]")
+# Grabs hostname from etcd datastore keys
+HOSTNAME_IP_DATASTORE_RE = re.compile(BGP_HOSTS_PATH + "(.*)/ip_addr_v[46]")
+HOSTNAME_ANY_BGP_DATASTORE_RE = re.compile(BGP_HOSTS_PATH +"(.*)/" +
+                                         "(ip_addr_v[46]|peer_v[46]/.*|as_num)")
 
 # Global configuration
 IP_IN_IP_PATH = CONFIG_PATH + "IpInIpEnabled"
@@ -254,9 +256,9 @@ class DatastoreClient(object):
         """
         host_path = HOST_PATH % {"hostname": hostname}
         host_ipv4 = HOST_IPV4_PATH % {"hostname": hostname}
-        bgp_ipv4 = BGP_HOST_IPV4_PATH  % {"hostname": hostname}
-        bgp_ipv6 = BGP_HOST_IPV6_PATH  % {"hostname": hostname}
-        bgp_as = BGP_HOST_AS_PATH  % {"hostname": hostname}
+        bgp_ipv4 = BGP_HOST_IPV4_PATH % {"hostname": hostname}
+        bgp_ipv6 = BGP_HOST_IPV6_PATH % {"hostname": hostname}
+        bgp_as = BGP_HOST_AS_PATH % {"hostname": hostname}
 
         # Set up the host
         self.etcd_client.write(host_ipv4, ipv4)
@@ -365,6 +367,47 @@ class DatastoreClient(object):
             pass
 
     @handle_errors
+    def get_hosts_data_dict(self):
+        """
+        Get list of hosts with data from the etcd datastore.
+        :return: Dictionary of host dictionaries, indexed by hostname, with data
+        for ipv4, ipv6, bgp peers and as_num
+        """
+        try:
+            # Get all host data
+            host_data = self.etcd_client.read(BGP_HOSTS_PATH, recursive=True)
+        except EtcdKeyNotFound:
+            # No BGP hosts currently configured in etcd
+            return {}
+
+        host_dict = {}
+        for host_leaf in host_data.leaves:
+            # Match expected host data values
+            match = HOSTNAME_ANY_BGP_DATASTORE_RE.match(host_leaf.key)
+            if match:
+                # Get hostname and key name from match data
+                hostname = match.group(1)
+                data_name = match.group(2)
+                if hostname not in host_dict.keys():
+                    # Hostname has not been added to dict, init host data now
+                    host_dict[hostname] = {"as_num":     "",
+                                           "ip_addr_v4": "",
+                                           "ip_addr_v6": "",
+                                           "peer_v4":    [],
+                                           "peer_v6":    []}
+                if data_name in ["as_num", "ip_addr_v4", "ip_addr_v6"]:
+                    host_dict[hostname][data_name] = host_leaf.value
+                else:
+                    # data_name is "peer_v[46]/<ip>", get "peer_v[46]
+                    peer_key = data_name.split("/")[0]
+
+                    # Save BGP peer dict {"ip": <ip>, "as_num": <as>} in data
+                    leaf_dict = json.loads(host_leaf.value)
+                    host_dict[hostname][peer_key].append(leaf_dict)
+
+        return host_dict
+
+    @handle_errors
     def get_hostnames_from_ips(self, ip_list):
         """
         Get the hostnames that are using the given IPs as their calico node IPs.
@@ -383,7 +426,7 @@ class DatastoreClient(object):
         # Loop through key-value pairs to find IP addresses
         for host_ip in host_ips:
             # Check for the ipv4 or ipv6 address key values
-            host_match = HOSTNAME_DATASTORE_RE.match(host_ip.key)
+            host_match = HOSTNAME_IP_DATASTORE_RE.match(host_ip.key)
             if host_match and host_ip.value in ip_list:
                 # Pull the hostname from the datastore key string
                 hostname = host_match.group(1)
@@ -401,8 +444,8 @@ class DatastoreClient(object):
         :param hostname: The hostname.
         :return: A tuple containing the IPv4 and IPv6 address.
         """
-        bgp_ipv4 = BGP_HOST_IPV4_PATH  % {"hostname": hostname}
-        bgp_ipv6 = BGP_HOST_IPV6_PATH  % {"hostname": hostname}
+        bgp_ipv4 = BGP_HOST_IPV4_PATH % {"hostname": hostname}
+        bgp_ipv6 = BGP_HOST_IPV6_PATH % {"hostname": hostname}
         try:
             ipv4 = self.etcd_client.read(bgp_ipv4).value
             ipv6 = self.etcd_client.read(bgp_ipv6).value

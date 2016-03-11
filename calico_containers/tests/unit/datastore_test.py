@@ -68,6 +68,7 @@ TEST_BGP_HOST_IPV4_PATH = TEST_BGP_HOST_PATH + "/ip_addr_v4"
 TEST_BGP_HOST_IPV6_PATH = TEST_BGP_HOST_PATH + "/ip_addr_v6"
 TEST_BGP_HOST_AS_PATH = TEST_BGP_HOST_PATH + "/as_num"
 TEST_NODE_BGP_PEERS_PATH = TEST_BGP_HOST_PATH + "/peer_v4/"
+TEST_NODE_BGP_PEERS_V6_PATH = TEST_BGP_HOST_PATH + "/peer_v6/"
 
 IPAM_V4_PATH = "/calico/ipam/v2/host/THIS_HOST/ipv4/block/"
 IPAM_V6_PATH = "/calico/ipam/v2/host/THIS_HOST/ipv6/block/"
@@ -1739,6 +1740,59 @@ class TestDatastoreClient(unittest.TestCase):
         """
         self.etcd_client.read.side_effect = EtcdKeyNotFound()
         assert_equal(self.datastore.get_default_node_as(), "64511")
+
+    def test_get_hosts_data(self):
+        """
+        Test get_hosts_data_dict returns expected values.
+        :return: None.
+        """
+        def mock_read(path, *args, **kwargs):
+            assert_equal(path, BGP_HOSTS_PATH+"/")
+            result = Mock(spec=EtcdResult)
+            ipv4_obj = Mock(spec=EtcdResult)
+            ipv4_obj.key = TEST_BGP_HOST_IPV4_PATH
+            ipv4_obj.value = "1.2.3.4"
+            ipv6_obj = Mock(spec=EtcdResult)
+            ipv6_obj.key = TEST_BGP_HOST_IPV6_PATH
+            ipv6_obj.value = "aa:bb::ee"
+            asnum_obj = Mock(spec=EtcdResult)
+            asnum_obj.key = TEST_BGP_HOST_AS_PATH
+            asnum_obj.value = "65111"
+            peer_v4_obj = Mock(spec=EtcdResult)
+            peer_v4_obj.key = TEST_NODE_BGP_PEERS_PATH + "10.10.10.10"
+            peer_v4_obj.value = u'{"ip":"10.10.10.10", "as_num": "65111"}'
+            peer_v6_obj = Mock(spec=EtcdResult)
+            peer_v6_obj.key = TEST_NODE_BGP_PEERS_V6_PATH + "aaaa::ffff"
+            peer_v6_obj.value = u'{"ip":"aaaa::ffff", "as_num": "65111"}'
+
+            result.leaves = [ipv4_obj, ipv6_obj, asnum_obj,
+                             peer_v4_obj, peer_v6_obj]
+            return result
+
+        self.etcd_client.read = mock_read
+
+        expected = {"TEST_HOST": {"ip_addr_v4":"1.2.3.4",
+                                  "ip_addr_v6":"aa:bb::ee",
+                                  "as_num": "65111",
+                                  "peer_v4": [{"ip":"10.10.10.10",
+                                               "as_num": "65111"}],
+                                  "peer_v6": [{"ip":"aaaa::ffff",
+                                               "as_num": "65111"}]}}
+        assert_equal(self.datastore.get_hosts_data_dict(), expected)
+
+    def test_get_hosts_data(self):
+        """
+        Test get_hosts_data_dict returns an empty dict if no hosts exist
+        :return: None.
+        """
+        def mock_read(path, *args, **kwargs):
+            assert_equal(path, BGP_HOSTS_PATH+"/")
+            result = Mock(spec=EtcdResult)
+            result.leaves = []
+            return result
+
+        self.etcd_client.read = mock_read
+        assert_equal(self.datastore.get_hosts_data_dict(), {})
 
     def test_get_hostnames_from_ips(self):
         """
