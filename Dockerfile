@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-FROM debian:wheezy
+FROM python:2.7.9-wheezy
 MAINTAINER Tom Denham <tom@projectcalico.org>
 
 WORKDIR /code/
@@ -23,7 +23,7 @@ RUN apt-get update && \
 # Git is installed to allow pip installation from a github repo and also so
 # that the right branch can be included if uploading coverage.
 ADD build-requirements.txt /code/
-RUN pip install setuptools==0.7.7
+RUN pip install --upgrade pip
 RUN pip install -r build-requirements.txt
 ADD . /tmp/pycalico
 RUN pip install /tmp/pycalico
