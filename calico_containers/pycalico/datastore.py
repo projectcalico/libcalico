@@ -22,7 +22,7 @@ from etcd import EtcdKeyNotFound, EtcdException, EtcdNotFile, EtcdKeyError
 from netaddr import IPNetwork, IPAddress, AddrFormatError
 
 from pycalico.datastore_datatypes import Rules, BGPPeer, IPPool, \
-    Endpoint, Profile, Rule, IF_PREFIX
+    Endpoint, Profile, Rule, IF_PREFIX, IPAMConfig
 from pycalico.datastore_errors import DataStoreError, \
     ProfileNotInEndpoint, ProfileAlreadyInEndpoint, MultipleEndpointsMatch
 from pycalico.util import get_hostname, validate_hostname_port
@@ -105,8 +105,10 @@ IP_IN_IP_ENABLED = "true"
 
 # IPAM paths
 IPAM_V_PATH = "/calico/ipam/v2/"
-IPAM_HOST_PATH = IPAM_V_PATH + "host/%(host)s/"
-IPAM_HOST_AFFINITY_PATH = IPAM_HOST_PATH + "ipv%(version)d/block/"
+IPAM_CONFIG_PATH = IPAM_V_PATH + "config"
+IPAM_HOSTS_PATH = IPAM_V_PATH + "host"
+IPAM_HOST_PATH = IPAM_HOSTS_PATH + "/%(host)s"
+IPAM_HOST_AFFINITY_PATH = IPAM_HOST_PATH + "/ipv%(version)d/block/"
 IPAM_BLOCK_PATH = IPAM_V_PATH + "assignment/ipv%(version)d/block/"
 IPAM_HANDLE_PATH = IPAM_V_PATH + "handle/"
 
@@ -472,7 +474,7 @@ class DatastoreClient(object):
             return as_num
 
     @handle_errors
-    def get_ip_pools(self, version, ipam=None):
+    def get_ip_pools(self, version, ipam=None, include_disabled=True):
         """
         Get the configured IP pools.
 
@@ -481,6 +483,7 @@ class DatastoreClient(object):
         returned.  If False, only pools that are not used by Calico IPAM are
         returned.  If True, only pools that are used by Calico IPAM are
         returned.
+        :param include_disabled:  Whether disabled pools should be in the list.
         :return: List of IPPool.
         """
         assert version in (4, 6)
@@ -499,7 +502,9 @@ class DatastoreClient(object):
 
             # If required, filter out pools that are not used for Calico IPAM.
             if ipam is not None:
-                pools = [pool for pool in pools if pool.ipam == ipam]
+                pools = [pool for pool in pools
+                              if ((pool.ipam == ipam) and
+                                  (include_disabled or not pool.disabled))]
 
         return pools
 
@@ -548,6 +553,23 @@ class DatastoreClient(object):
         return IPPool.from_json(data)
 
     @handle_errors
+    def set_ip_pool_config(self, version, pool):
+        """
+        Set the IP pool configuration.
+
+        :param version: 4 for IPv4, 6 for IPv6
+        :param pool: IPPool object to configure in the datastore.
+        :return: None
+        """
+        assert version in (4, 6)
+        assert isinstance(pool, IPPool)
+
+        # Now write the pool configuration.
+        key = IP_POOL_KEY % {"version": str(version),
+                             "pool": str(pool.cidr).replace("/", "-")}
+        self.etcd_client.write(key, pool.to_json())
+
+    @handle_errors
     def add_ip_pool(self, version, pool):
         """
         Add the given pool to the list of IP allocation pools.  If the pool
@@ -574,9 +596,7 @@ class DatastoreClient(object):
                 self.etcd_client.write(IP_IN_IP_PATH, IP_IN_IP_ENABLED)
 
         # Now write the pool configuration.
-        key = IP_POOL_KEY % {"version": str(version),
-                             "pool": str(pool.cidr).replace("/", "-")}
-        self.etcd_client.write(key, pool.to_json())
+        self.set_ip_pool_config(version, pool)
 
     @handle_errors
     def remove_ip_pool(self, version, cidr):
@@ -1175,9 +1195,7 @@ class DatastoreClient(object):
     @handle_errors
     def set_default_node_as(self, as_num):
         """
-        Return the default node BGP AS Number
-
-        :return: The default node BGP AS Number.
+        Set the default node BGP AS Number
         """
         self.etcd_client.write(BGP_NODE_DEF_AS_PATH, str(as_num))
 

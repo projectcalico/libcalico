@@ -29,10 +29,9 @@ from pycalico.datastore import (DatastoreClient, CALICO_V_PATH,
                                 ETCD_AUTHORITY_ENV, ETCD_CA_CERT_FILE_ENV,
                                 ETCD_CERT_FILE_ENV, ETCD_KEY_FILE_ENV)
 from pycalico.datastore_errors import DataStoreError, ProfileNotInEndpoint, ProfileAlreadyInEndpoint, \
-    MultipleEndpointsMatch
+    MultipleEndpointsMatch, InvalidBlockSizeError
 from pycalico.datastore_datatypes import Rules, BGPPeer, IPPool, \
     Endpoint, Profile, Rule
-from pycalico.block import CidrTooSmallError
 
 TEST_HOST = "TEST_HOST"
 TEST_ORCH_ID = "docker"
@@ -461,9 +460,9 @@ class TestIPPool(unittest.TestCase):
         Test IPPool equality operator.
         """
         ippool1 = IPPool("1.2.3.4/24",
-                         ipip=True, masquerade=True, ipam=False)
+                         ipip=True, masquerade=True, ipam=False, disabled=True)
         ippool2 = IPPool(IPNetwork("1.2.3.8/24"),
-                         ipip=True, masquerade=True, ipam=False)
+                         ipip=True, masquerade=True, ipam=False, disabled=True)
         ippool3 = IPPool("1.2.3.4/24",
                          ipip=True, ipam=False)
         ippool4 = IPPool("1.2.3.4/24",
@@ -501,17 +500,17 @@ class TestIPPool(unittest.TestCase):
         bad_cidr3 = "ffff::/128"
         good_cidr1 = "10.10.10.10/24"
         good_cidr2 = "ffff::/120"
-        self.assertRaises(CidrTooSmallError,
+        self.assertRaises(InvalidBlockSizeError,
                           IPPool, bad_cidr1, ipam=True)
-        self.assertRaises(CidrTooSmallError,
+        self.assertRaises(InvalidBlockSizeError,
                           IPPool, bad_cidr2, ipam=True)
-        self.assertRaises(CidrTooSmallError,
+        self.assertRaises(InvalidBlockSizeError,
                           IPPool, bad_cidr3, ipam=True)
         try:
             IPPool(good_cidr1, ipam=True)
             IPPool(good_cidr2, ipam=True)
             IPPool(bad_cidr1, ipam=False)
-        except CidrTooSmallError:
+        except InvalidBlockSizeError:
             self.fail("Received unexpected AddressRangeNotAllowedError")
 
 
@@ -1096,7 +1095,7 @@ class TestDatastoreClient(unittest.TestCase):
         self.etcd_client.read.side_effect = EtcdKeyNotFound
 
         pool = IPPool("192.168.100.5/24", ipip=True, masquerade=True,
-                      ipam=False)
+                      ipam=False, disabled=True)
         self.datastore.add_ip_pool(4, pool)
         self.etcd_client.write.assert_has_calls(
                              [call(CONFIG_PATH + "IpInIpEnabled", "true"),
@@ -1106,7 +1105,8 @@ class TestDatastoreClient(unittest.TestCase):
         self.assertEqual(data, {'cidr': '192.168.100.0/24',
                                 "ipip": "tunl0",
                                 'masquerade': True,
-                                "ipam": False})
+                                "ipam": False,
+                                "disabled": True})
         self.assertEqual(pool, IPPool.from_json(raw_data))
 
     def test_del_ip_pool_exists(self):

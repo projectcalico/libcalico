@@ -19,10 +19,11 @@ import unittest
 import json
 from pycalico.block import (AllocationBlock,
                             BLOCK_SIZE,
-                            NoHostAffinityWarning,
+                            NoHostAffinityError,
                             AlreadyAssignedError,
                             AddressNotAssignedError,
-                            get_block_cidr_for_address)
+                            get_block_cidr_for_address,
+                            validate_block_size)
 from etcd import EtcdResult
 
 network = IPNetwork("192.168.25.0/26")
@@ -35,14 +36,14 @@ class TestAllocationBlock(unittest.TestCase):
     def test_init_block_id(self):
 
         host = "test_host"
-        block = AllocationBlock(network, host)
+        block = AllocationBlock(network, host, False)
         assert_equal(block.host_affinity, host)
         assert_equal(block.cidr, network)
         assert_equal(block.count_free_addresses(), BLOCK_SIZE)
 
     def test_to_json(self):
         host = "test_host"
-        block = AllocationBlock(network, host)
+        block = AllocationBlock(network, host, False)
 
         # Set up an allocation
         attr = {
@@ -108,6 +109,7 @@ class TestAllocationBlock(unittest.TestCase):
         json_dict = {
             AllocationBlock.CIDR: str(network),
             AllocationBlock.AFFINITY: "host:Sammy Davis, Jr.",
+            AllocationBlock.STRICT_AFFINITY: True,
             AllocationBlock.ALLOCATIONS: allocations,
             AllocationBlock.ATTRIBUTES: [attr0, attr1]
         }
@@ -118,6 +120,7 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(block.db_result, result)
         assert_equal(block.cidr, network)
         assert_equal(block.host_affinity, "Sammy Davis, Jr.")
+        assert_true(block.strict_affinity)
         assert_list_equal(block.allocations[:5], [0, 0, None, None, 1])
         assert_dict_equal(block.attributes[0], attr0)
         assert_dict_equal(block.attributes[1], attr1)
@@ -139,7 +142,8 @@ class TestAllocationBlock(unittest.TestCase):
 
         result = Mock(spec=EtcdResult)
 
-        # Build a JSON object for the Block
+        # Build a JSON object for the Block.  Assume the strict_affinity flag is
+        # not present so that we default the value (to False).
         attr0 = {
             AllocationBlock.ATTR_HANDLE_ID: "test_key1",
             AllocationBlock.ATTR_SECONDARY: {
@@ -173,13 +177,16 @@ class TestAllocationBlock(unittest.TestCase):
         assert_equal(block.db_result, result)
         assert_equal(block.cidr, network)
         assert_equal(block.host_affinity, "Sammy Davis, Jr.")
+        assert_false(block.strict_affinity)
         assert_list_equal(block.allocations[:3], [0, 0, 1])
         assert_dict_equal(block.attributes[0], attr0)
         assert_dict_equal(block.attributes[1], attr1)
 
-        # Verify we can get JSON back out.
+        # Verify we can get JSON back out.  Note that the strict affinity flag
+        # will now be present.
+        json_dict[AllocationBlock.STRICT_AFFINITY] = False
         json_str = block.to_json()
-        assert_equal(result.value, json_str)
+        assert_equal(json.dumps(json_dict), json_str)
 
         # Modify the allocation order in the JSON so that it does not match
         # the allocations, and check the various unallocated asserts.
@@ -231,13 +238,17 @@ class TestAllocationBlock(unittest.TestCase):
         allocations[2] = 1
         json_dict = {
             AllocationBlock.CIDR: str(network),
-            AllocationBlock.AFFINITY: "host:Sammy Davis, Jr.",
+            AllocationBlock.AFFINITY: "",   # Test a block with no affinity
+            AllocationBlock.STRICT_AFFINITY: False,
             AllocationBlock.ALLOCATIONS: allocations,
             AllocationBlock.ATTRIBUTES: [attr0, attr1]
         }
         result.value = json.dumps(json_dict)
 
         block = AllocationBlock.from_etcd_result(result)
+
+        # Verify the block has no affinity
+        assert_equal(block.host_affinity, None)
 
         # Verify that the allocation order is correctly initialised.
         unallocated = list(range(3, BLOCK_SIZE))
@@ -430,7 +441,7 @@ class TestAllocationBlock(unittest.TestCase):
 
         # Test ordinal math still works for small IPv6 addresses
         sm_cidr = IPNetwork("::1234:5600/122")
-        block3 = AllocationBlock(sm_cidr, "test_host1")
+        block3 = AllocationBlock(sm_cidr, "test_host1", False)
         ips = block3.auto_assign(4, None, {}, TEST_HOST)
         assert_list_equal([sm_cidr[0],
                            sm_cidr[1],
@@ -440,7 +451,7 @@ class TestAllocationBlock(unittest.TestCase):
 
     def test_auto_assign_wrong_host(self):
         block0 = _test_block_empty_v4()
-        assert_raises(NoHostAffinityWarning, block0.auto_assign, 1, None, {},
+        assert_raises(NoHostAffinityError, block0.auto_assign, 1, None, {},
                       "DifferentHost")
 
         # Disable the check.
@@ -452,20 +463,42 @@ class TestAllocationBlock(unittest.TestCase):
 
         ip0 = BLOCK_V4_1[2]
         attr = {"key21": "value1", "key22": "value2"}
-        block0.assign(ip0, "key0", attr)
+        block0.assign(ip0, "key0", attr, TEST_HOST)
 
         # Try to assign the same address again.
-        assert_raises(AlreadyAssignedError, block0.assign, ip0, "key0", attr)
+        assert_raises(AlreadyAssignedError, block0.assign,
+                      ip0, "key0", attr, TEST_HOST)
 
     def test_assign_v6(self):
         block0 = _test_block_empty_v6()
 
         ip0 = BLOCK_V6_1[2]
         attr = {"key21": "value1", "key22": "value2"}
-        block0.assign(ip0, "key0", attr)
+        block0.assign(ip0, "key0", attr, TEST_HOST)
 
         # Try to assign the same address again.
-        assert_raises(AlreadyAssignedError, block0.assign, ip0, "key0", attr)
+        assert_raises(AlreadyAssignedError, block0.assign,
+                      ip0, "key0", attr, TEST_HOST)
+
+    def test_assign_v4_strict_affinity(self):
+        """
+        Test attempting to assign with strict affinity raises an error.
+        """
+        block0 = _test_block_empty_v4()
+        block0.strict_affinity = True
+
+        # Test assign() raises an exception.
+        ip0 = BLOCK_V4_1[2]
+        attr = {"key21": "value1", "key22": "value2"}
+        assert_raises(NoHostAffinityError, block0.assign,
+                      ip0, "key0", attr, "Not test host")
+
+        # Test auto_assign() raises an exception regardless of the value of
+        # affinity_check.
+        assert_raises(NoHostAffinityError, block0.auto_assign,
+                      1, "key0", attr, "Not test host", affinity_check=True)
+        assert_raises(NoHostAffinityError, block0.auto_assign,
+                      1, "key0", attr, "Not test host", affinity_check=False)
 
     def test_release_v4(self):
         """
@@ -474,7 +507,7 @@ class TestAllocationBlock(unittest.TestCase):
         """
         block0 = _test_block_not_empty_v4()
         ip = BLOCK_V4_1[13]
-        block0.assign(ip, None, {})
+        block0.assign(ip, None, {}, TEST_HOST)
 
         # We have released 13. Ordinals 2 and 4 are still assigned.
         (err, handles) = block0.release({ip})
@@ -532,7 +565,7 @@ class TestAllocationBlock(unittest.TestCase):
         """
         block0 = _test_block_not_empty_v6()
         ip = IPAddress("2001:abcd:def0::000d")
-        block0.assign(ip, None, {})
+        block0.assign(ip, None, {}, TEST_HOST)
         assert_is_not_none(block0.allocations[13])
 
         # We have released 13. Ordinals 2 and 4 are still assigned.
@@ -593,7 +626,7 @@ class TestAllocationBlock(unittest.TestCase):
                                 IPAddress("10.11.12.4")])
 
         ip0 = IPAddress("10.11.12.56")
-        block0.assign(ip0, None, {})
+        block0.assign(ip0, None, {}, TEST_HOST)
         ips = block0.get_ip_assignments_by_handle(None)
         assert_list_equal(ips, [ip0])
 
@@ -612,7 +645,7 @@ class TestAllocationBlock(unittest.TestCase):
         ip0 = IPAddress("10.11.12.56")
         attr0 = {"a": 1, "b": 2, "c": 3}
         handle0 = "key0"
-        block0.assign(ip0, handle0, attr0)
+        block0.assign(ip0, handle0, attr0, TEST_HOST)
         (handle, attr) = block0.get_attributes_for_ip(ip0)
         assert_equal(handle, handle0)
         assert_dict_equal(attr, attr0)
@@ -636,7 +669,7 @@ class TestAllocationBlock(unittest.TestCase):
         assert_list_equal(block.unallocated[-2:], [2, 4])
 
 
-class TestGetBlockCIDRForAddress(unittest.TestCase):
+class TestBlockFunctions(unittest.TestCase):
 
     @parameterized.expand([
         (IPAddress("192.168.3.7"),
@@ -655,9 +688,18 @@ class TestGetBlockCIDRForAddress(unittest.TestCase):
         block_id = get_block_cidr_for_address(address)
         assert_equal(block_id, cidr)
 
+    def test_validate_block_size(self):
+        """
+        Test validate_block_size()
+        """
+        assert_equal(validate_block_size(IPNetwork("1.2.3.4/1")), True)
+        assert_equal(validate_block_size(IPNetwork("1.2.3.4/26")), True)
+        assert_equal(validate_block_size(IPNetwork("1.2.3.4/27")), False)
+        assert_equal(validate_block_size(IPNetwork("1.2.3.4/32")), False)
+
 
 def _test_block_empty_v4():
-    block = AllocationBlock(BLOCK_V4_1, "test_host1")
+    block = AllocationBlock(BLOCK_V4_1, "test_host1", False)
     return block
 
 
@@ -676,7 +718,7 @@ def _test_block_not_empty_v4():
 
 
 def _test_block_empty_v6():
-    block = AllocationBlock(BLOCK_V6_1, "test_host1")
+    block = AllocationBlock(BLOCK_V6_1, "test_host1", False)
     return block
 
 

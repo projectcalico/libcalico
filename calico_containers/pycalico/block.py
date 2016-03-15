@@ -54,11 +54,12 @@ class AllocationBlock(object):
     HOST_AFFINITY_T = "host:%s"
     ALLOCATIONS = "allocations"
     UNALLOCATED = "unallocated"
+    STRICT_AFFINITY = "strict_affinity"
     ATTRIBUTES = "attributes"
     ATTR_HANDLE_ID = "handle_id"
     ATTR_SECONDARY = "secondary"
 
-    def __init__(self, cidr_prefix, host_affinity):
+    def __init__(self, cidr_prefix, host_affinity, strict_affinity):
         assert isinstance(cidr_prefix, IPNetwork)
         assert cidr_prefix.cidr == cidr_prefix
 
@@ -71,10 +72,20 @@ class AllocationBlock(object):
         """
         Both to minimize collisions, where multiple hosts attempt to change a
         single block, and to support route aggregation, each block has affinity
-        to a single Calico host.  That host does not hold exclusive rights to
-        modify the block; any host may still do that.  The host with affinity
-        simply uses the block as the place where it first searches if the user
-        asked to have the IP assigned automatically.
+        to a single Calico host.  If strict_affinity is set to False then
+        that host does not hold exclusive rights to modify the block; any host
+        may still do that.  The host with affinity simply uses the block as the
+        place where it first searches if the user asked to have the IP assigned
+        automatically.
+
+        If this is set to None, the block has no affinity to a particular host.
+        """
+
+        self.strict_affinity = strict_affinity
+        """
+        Whether this block has strict host affinity or not.  When set to False,
+        the IPAM client can allocate from this block even if the block does not
+        have affinity to that host.
         """
 
         self.allocations = [None] * BLOCK_SIZE
@@ -89,7 +100,7 @@ class AllocationBlock(object):
         """
         An array of unallocated addresses, with most recently de-allocated
         addresses at the end of the list.  Each entry contains an address
-        ordinal (that is the index into the CIDR for the actual IP address.
+        ordinal (that is the index into the CIDR for the actual IP address).
 
         When auto-assigning addresses, addresses are preferentially chosen
         from the start of the list so that addresses are not re-used
@@ -112,10 +123,14 @@ class AllocationBlock(object):
         """
         Convert to a JSON representation for writing to etcd.
         """
+        # Convert a host value of None to an empty string.
+        affinity = AllocationBlock.HOST_AFFINITY_T % self.host_affinity \
+                     if self.host_affinity \
+                     else ""
 
         json_dict = {AllocationBlock.CIDR: str(self.cidr),
-                     AllocationBlock.AFFINITY:
-                         AllocationBlock.HOST_AFFINITY_T % self.host_affinity,
+                     AllocationBlock.STRICT_AFFINITY: self.strict_affinity,
+                     AllocationBlock.AFFINITY: affinity,
                      AllocationBlock.ALLOCATIONS: self.allocations,
                      AllocationBlock.ATTRIBUTES: self.attributes,
                      AllocationBlock.UNALLOCATED: self.unallocated}
@@ -129,12 +144,22 @@ class AllocationBlock(object):
         json_dict = json.loads(etcd_result.value)
         cidr_prefix = IPNetwork(json_dict[AllocationBlock.CIDR])
 
-        # Parse out the host.  For now, it's in the form host:<host id>
+        # Parse out the host.  For now, it's in the form host:<host id>.  An
+        # empty host ID is converted to None to indicate the block has no
+        # specific host affinity.
         affinity = json_dict[AllocationBlock.AFFINITY]
-        assert affinity[:5] == "host:"
-        host_affinity = affinity[5:]
+        if not affinity:
+            host_affinity = None
+        else:
+            assert affinity[:5] == "host:"
+            host_affinity = affinity[5:]
 
-        block = cls(cidr_prefix, host_affinity)
+        # Parse out the strict_affinity flag.  If this does not exist
+        # assume False.
+        strict_affinity = json_dict.get(AllocationBlock.STRICT_AFFINITY,
+                                        False)
+
+        block = cls(cidr_prefix, host_affinity, strict_affinity)
         block.db_result = etcd_result
 
         # Process & check allocations
@@ -179,18 +204,20 @@ class AllocationBlock(object):
         :param attributes: Contents of this dict will be stored with the
         assignment and can be queried using get_assignment_attributes().  Must
         be JSON serializable.
-        :param host: The host ID to use for affinity in when assigning IP
-        addresses.
+        :param host: The ID of the host requesting addresses.
         :param affinity_check: If true, verify that this block's affinity
-        matches the supplied host and throw a NoHostAffinityWarning if it
-        doesn't.  Set to false to disable this check.
+        matches the supplied host and throw a NoHostAffinityError if it
+        doesn't.  Set to false to disable this check.  If the block has
+        strict_affinity set to True, this parameter is ignored, and an
+        affinity check is always performed.
         :return: List of assigned addresses.  When the block is at or near
         full, this method may return fewer than requested IPs.
         """
         assert num >= 0
 
+        affinity_check = self.strict_affinity or affinity_check
         if affinity_check and host != self.host_affinity:
-            raise NoHostAffinityWarning("Block host affinity is %s (not %s)" %
+            raise NoHostAffinityError("Block host affinity is %s (not %s)" %
                                         (self.host_affinity, host))
 
         ordinals = []
@@ -214,10 +241,12 @@ class AllocationBlock(object):
                 ips.append(ip)
         return ips
 
-    def assign(self, address, handle_id, attributes):
+    def assign(self, address, handle_id, attributes, host):
         """
         Assign the given address.  Throws AlreadyAssignedError if the address
-        is taken.
+        is taken.  If the block has strict_affinity check set to True,
+        then a NoHostAffinityError will be thrown if the host affinity of the
+        block does not match the host requesting the address.
 
         :param address: IPAddress to assign.
         :param handle_id: allocation handle ID for this request.  You can
@@ -226,23 +255,28 @@ class AllocationBlock(object):
         :param attributes: Contents of this dict will be stored with the
         assignment and can be queried using get_assignment_attributes().  Must
         be JSON serializable.
+        :param host: The ID of the host requesting addresses.
         :return: None.
         """
         assert isinstance(address, IPAddress)
+
+        if self.strict_affinity and host != self.host_affinity:
+            raise NoHostAffinityError("Block host affinity is %s (not %s)" %
+                                      (self.host_affinity, host))
+
         # Convert to an ordinal
         ordinal = int(address - self.cidr.first)
         assert 0 <= ordinal <= BLOCK_SIZE, "Address not in block."
 
         # Check if allocated
         if self.allocations[ordinal] is not None:
-            raise AlreadyAssignedError("%s is already assigned in block %s" % (
-                address, self.cidr))
+            raise AlreadyAssignedError("%s is already assigned in block %s" %
+                                       (address, self.cidr))
 
         # Set up attributes
         attr_index = self._find_or_add_attrs(handle_id, attributes)
         self.allocations[ordinal] = attr_index
         self.unallocated.remove(ordinal)
-        return
 
     def count_free_addresses(self):
         """
@@ -252,6 +286,14 @@ class AllocationBlock(object):
         # Simply return the length of the unallocated list since we have
         # an entry for each free address.
         return len(self.unallocated)
+
+    def is_empty(self):
+        """
+        Returns whether the block is empty - that is there are no IP
+        assignments in the block.
+        :return: True if empty, False otherwise.
+        """
+        return (self.count_free_addresses() == BLOCK_SIZE)
 
     def release(self, addresses):
         """
@@ -309,7 +351,7 @@ class AllocationBlock(object):
             self._delete_attributes(attr_indexes_to_delete, ordinals)
 
         # All attributes updated.  Finally, release all the requested
-        # addressses.
+        # addresses.
         for ordinal in ordinals:
             self.allocations[ordinal] = None
             self.unallocated.append(ordinal)
@@ -506,6 +548,7 @@ class AllocationBlock(object):
 
         return True
 
+
 def get_block_cidr_for_address(address):
     """
     Get the block ID to which a given address belongs.
@@ -516,6 +559,15 @@ def get_block_cidr_for_address(address):
     return IPNetwork(block_id)
 
 
+def validate_block_size(cidr):
+    """
+    Check that the CIDR block size is valid.  This checks that it is at least
+    as large as the minimum block size.
+    """
+    assert isinstance(cidr, IPNetwork)
+    return cidr.prefixlen <= BLOCK_PREFIXLEN[cidr.version]
+
+
 class BlockError(PyCalicoError):
     """
     Base exception class for AllocationBlocks.
@@ -523,10 +575,10 @@ class BlockError(PyCalicoError):
     pass
 
 
-class NoHostAffinityWarning(BlockError):
+class NoHostAffinityError(BlockError):
     """
-    Tried to auto-assign in a block this host didn't own.  This exception can
-    be explicitly disabled.
+    Tried to assign in a block this host didn't own when affinity to the block
+    is required.
     """
     pass
 
@@ -541,11 +593,5 @@ class AlreadyAssignedError(BlockError):
 class AddressNotAssignedError(BlockError):
     """
     Tried to query an address that isn't assigned.
-    """
-    pass
-
-class CidrTooSmallError(BlockError):
-    """
-    Tried to assign a CIDR that is too small to fit in an IP block.
     """
     pass
