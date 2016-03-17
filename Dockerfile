@@ -19,11 +19,10 @@ WORKDIR /code/
 RUN apt-get update && \
     apt-get install -qy python-dev python-pip git libffi-dev libssl-dev procps
 
-# Install the python packages needed for running UTs and building calicoctl.
-# Git is installed to allow pip installation from a github repo and also so
-# that the right branch can be included if uploading coverage.
-ADD build-requirements.txt /code/
+# Install the python packages needed for building binaries for Calico Python components.
+# Git is installed to allow pip installation from a Github repository.
 RUN pip install --upgrade pip
-RUN pip install -r build-requirements.txt
+ADD build-requirements-frozen.txt /code/
+RUN pip install -r build-requirements-frozen.txt
 ADD . /tmp/pycalico
 RUN pip install /tmp/pycalico

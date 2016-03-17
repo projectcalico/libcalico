@@ -2,7 +2,7 @@
 
 SRCDIR=calico_containers
 PYCALICO=$(wildcard $(SRCDIR)/pycalico/*.py)
-BUILD_FILES=Dockerfile build-requirements.txt
+BUILD_FILES=Dockerfile build-requirements-frozen.txt
 
 WHEEL_VERSION=0.1.0
 
@@ -10,6 +10,11 @@ default: all
 all: test
 wheel: dist/pycalico-$(WHEEL_VERSION)-py2-none-any.whl
 test: ut
+
+update-frozen:
+	cp build-requirements.txt build-requirements-frozen.txt
+	docker build -t calico/build .
+	docker run --rm calico/build pip freeze | grep -v pycalico > build-requirements-frozen.txt
 
 calicobuild.created: $(BUILD_FILES)
 	docker build -t calico/build .
