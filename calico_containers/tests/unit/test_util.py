@@ -15,7 +15,8 @@
 import unittest
 from mock import patch
 from subprocess import CalledProcessError, check_output
-from pycalico.util import get_host_ips, validate_characters, validate_ports, validate_icmp_type, validate_hostname_port
+from pycalico.util import get_host_ips, validate_characters, validate_ports, validate_icmp_type, validate_hostname_port, \
+    validate_cidr_versions, validate_ip, validate_cidr
 from nose_parameterized import parameterized
 
 MOCK_IP_ADDR = \
@@ -274,4 +275,70 @@ class TestUtil(unittest.TestCase):
         test_result = validate_hostname_port(input_string)
 
         # Assert expected result
+        self.assertEqual(expected_result, test_result)
+
+    @parameterized.expand([
+        ('127.a.0.1', False),
+        ('aa:bb::zz', False),
+        ('1.2.3.4', True),
+        ('1.2.3.0/24', True),
+        ('aa:bb::ff', True),
+        ('1111:2222:3333:4444:5555:6666:7777:8888', True),
+        ('4294967295', False)
+    ])
+    def test_validate_cidr(self, cidr, expected_result):
+        """
+        Test validate_cidr function in calico_ctl utils
+        """
+        # Call method under test
+        test_result = validate_cidr(cidr)
+
+        # Assert
+        self.assertEqual(expected_result, test_result)
+
+    @parameterized.expand([
+        (["1.2.3.4"], 4, True),
+        (["1.2.3.4"], None, True),
+        (["aa:bb::zz"], 6, False),
+        (["aa:bb::zz"], None, False),
+        (["10.0.0.1", "11.0.0.1", "11.0.0.1"], 4, True),
+        (["10.0.0.1", "11.0.0.1", "11.0.0.1"], None, True),
+        (["1111:2222:3333:4444:5555:6666:7777:8888", "a::b"], 6, True),
+        (["1111:2222:3333:4444:5555:6666:7777:8888", "a::b", "1234::1"],
+                                                                    None, True),
+        (["127.1.0.1", "dead:beef"], None, False),
+        (["aa:bb::zz"], 4, False),
+        (["1.2.3.4"], 6, False),
+        (["0bad:beef", "1.2.3.4"], 4, False),
+        (["0bad:beef", "1.2.3.4"], 6, False),
+        (["0bad:beef", "1.2.3.4"], None, False),
+    ])
+    def test_validate_cidr_versions(self, cidr_list, ip_version, expected_result):
+        """
+        Test validate_cidr_versions function in calico_ctl utils
+        """
+        # Call method under test
+        test_result = validate_cidr_versions(cidr_list,
+                                                   ip_version=ip_version)
+
+        # Assert
+        self.assertEqual(expected_result, test_result)
+
+    @parameterized.expand([
+        ('1.2.3.4', 4, True),
+        ('1.2.3.4', 6, False),
+        ('1.2.3.4', 4, True),
+        ('1.2.3.0/24', 4, False),
+        ('aa:bb::ff', 4, False),
+        ('aa:bb::ff', 6, True),
+        ('1111:2222:3333:4444:5555:6666:7777:8888', 6, True),
+    ])
+    def test_validate_ip(self, ip, version, expected_result):
+        """
+        Test validate_ip function in calico_ctl utils
+        """
+        # Call method under test
+        test_result = validate_ip(ip, version)
+
+        # Assert
         self.assertEqual(expected_result, test_result)
