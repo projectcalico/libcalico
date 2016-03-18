@@ -1,9 +1,8 @@
-setuptools==0.9.8
-docopt==0.6.2
-PyInstaller==3.1
-six==1.9.0
-docker-py==1.7.0
-prettytable==0.7.2
-netaddr==0.7.15
-ConcurrentLogHandler==0.9.1
-pyyaml==3.11
+setuptools
+docopt
+PyInstaller
+docker-py
+prettytable
+netaddr
+ConcurrentLogHandler
+pyyaml
