@@ -29,6 +29,7 @@ from pycalico.util import get_hostname, validate_hostname_port
 
 ETCD_AUTHORITY_DEFAULT = "127.0.0.1:2379"
 ETCD_AUTHORITY_ENV = "ETCD_AUTHORITY"
+ETCD_ENDPOINTS_ENV = "ETCD_ENDPOINTS"
 
 # Secure etcd with SSL environment variables and paths
 ETCD_SCHEME_DEFAULT = "http"
@@ -137,17 +138,61 @@ class DatastoreClient(object):
     """
 
     def __init__(self):
+        etcd_endpoints = os.getenv(ETCD_ENDPOINTS_ENV, '')
         etcd_authority = os.getenv(ETCD_AUTHORITY_ENV, ETCD_AUTHORITY_DEFAULT)
-        if not validate_hostname_port(etcd_authority):
-            raise DataStoreError("Invalid %s. It must take the form "
-                                 "<address>:<port>. Value provided is '%s'" %
-                                 (ETCD_AUTHORITY_ENV, etcd_authority))
-
-        (host, port) = etcd_authority.split(":", 1)
         etcd_scheme = os.getenv(ETCD_SCHEME_ENV, ETCD_SCHEME_DEFAULT)
         etcd_key = os.getenv(ETCD_KEY_FILE_ENV, '')
         etcd_cert = os.getenv(ETCD_CERT_FILE_ENV, '')
         etcd_ca = os.getenv(ETCD_CA_CERT_FILE_ENV, '')
+
+        addr_env = None
+        scheme_env = None
+        etcd_addrs_raw = []
+        if etcd_endpoints:
+            # ETCD_ENDPOINTS specified: use it to determine scheme and etcd
+            # location.
+            endpoints = [x.strip() for x in etcd_endpoints.split(",")]
+            try:
+                scheme = None
+                for e in endpoints:
+                    s, a = e.split("://")
+                    etcd_addrs_raw.append(a)
+                    if scheme == None:
+                        scheme = s
+                    else:
+                        if scheme != s:
+                            raise DataStoreError(
+                                "Inconsistent protocols in %s.  Value "
+                                "provided is '%s'" %
+                                (ETCD_ENDPOINTS_ENV, etcd_endpoints)
+                            )
+                etcd_scheme = scheme
+                addr_env = ETCD_ENDPOINTS_ENV
+                scheme_env = ETCD_ENDPOINTS_ENV
+            except ValueError:
+                raise DataStoreError("Invalid %s. It must take the form"
+                                     "'ENDPOINT[,ENDPOINT][,...]' where "
+                                     "ENDPOINT:='http[s]://ADDRESS:PORT'. "
+                                     "Value provided is '%s'" %
+                                     (ETCD_ENDPOINTS_ENV, etcd_endpoints))
+        else:
+            # ETCD_ENDPOINTS not specified, fall back to ETCD_AUTHORITY and
+            # ETCD_SCHEME instead.
+            etcd_addrs_raw.append(etcd_authority)
+            addr_env = ETCD_AUTHORITY_ENV
+            scheme_env = ETCD_SCHEME_ENV
+
+        etcd_addrs = []
+        for addr in etcd_addrs_raw:
+            if not validate_hostname_port(addr):
+                raise DataStoreError(
+                    "Invalid %s. Address must take the form "
+                    "<address>:<port>. Value provided is '%s'" %
+                    (addr_env, addr)
+                )
+            (host, port) = addr.split(":", 1)
+            etcd_addrs.append((host, int(port)))
+
         key_pair = (etcd_cert, etcd_key) if (etcd_cert and etcd_key) else None
 
         if etcd_scheme == "https":
@@ -182,15 +227,27 @@ class DatastoreClient(object):
         elif etcd_scheme != "http":
             raise DataStoreError("Invalid %s. Value must be one of: \"\", "
                                  "\"http\", \"https\". Value provided: %s" %
-                                 (ETCD_SCHEME_ENV, etcd_scheme))
+                                 (scheme_env, etcd_scheme))
 
         # Set CA value to None if it is a None-value string
         etcd_ca = None if not etcd_ca else etcd_ca
-        self.etcd_client = etcd.Client(host=host,
-                                       port=int(port),
-                                       protocol=etcd_scheme,
-                                       cert=key_pair,
-                                       ca_cert=etcd_ca)
+
+        # python-etcd Client requires a different invocation when there's only
+        # a single etcd host.
+        if len(etcd_addrs) > 1:
+            # Specify allow_reconnect when there are multiple endpoints, so
+            # python-etcd will try connecting to all of them if one fails.
+            self.etcd_client = etcd.Client(host=tuple(etcd_addrs),
+                                           protocol=etcd_scheme,
+                                           cert=key_pair,
+                                           ca_cert=etcd_ca,
+                                           allow_reconnect=True)
+        else:
+            self.etcd_client = etcd.Client(host=etcd_addrs[0][0],
+                                           port=etcd_addrs[0][1],
+                                           protocol=etcd_scheme,
+                                           cert=key_pair,
+                                           ca_cert=etcd_ca)
 
     @handle_errors
     def ensure_global_config(self):
@@ -586,7 +643,7 @@ class DatastoreClient(object):
         # If IP in IP is enabled on the pool, ensure that it is enabled
         # globally.
         if pool.ipip:
-            # Attempt to read existing config and enable ipip if 
+            # Attempt to read existing config and enable ipip if
             # etcd is empty or ipip is disabled.
             try:
                 result = self.etcd_client.read(IP_IN_IP_PATH)

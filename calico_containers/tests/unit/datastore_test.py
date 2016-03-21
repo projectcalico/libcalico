@@ -26,6 +26,7 @@ from mock import patch, Mock, call
 
 from pycalico.datastore import (DatastoreClient, CALICO_V_PATH,
                                 ETCD_SCHEME_ENV, ETCD_SCHEME_DEFAULT,
+                                ETCD_ENDPOINTS_ENV,
                                 ETCD_AUTHORITY_ENV, ETCD_CA_CERT_FILE_ENV,
                                 ETCD_CERT_FILE_ENV, ETCD_KEY_FILE_ENV)
 from pycalico.datastore_errors import DataStoreError, ProfileNotInEndpoint, ProfileAlreadyInEndpoint, \
@@ -89,6 +90,16 @@ EP_12.profile_ids = ["UNIT"]
 ETCD_ENV_DICT = {
     ETCD_AUTHORITY_ENV   : "127.0.0.2:4002",
     ETCD_SCHEME_ENV      : ETCD_SCHEME_DEFAULT,
+    ETCD_ENDPOINTS_ENV   : "",
+    ETCD_KEY_FILE_ENV    : "",
+    ETCD_CERT_FILE_ENV   : "",
+    ETCD_CA_CERT_FILE_ENV: ""
+}
+
+ETCD_ENV_DICT_ENDPOINTS = {
+    ETCD_AUTHORITY_ENV   : "127.0.0.2:4002",
+    ETCD_SCHEME_ENV      : ETCD_SCHEME_DEFAULT,
+    ETCD_ENDPOINTS_ENV   : "http://1.2.3.4:5, http://6.7.8.9:10",
     ETCD_KEY_FILE_ENV    : "",
     ETCD_CERT_FILE_ENV   : "",
     ETCD_CA_CERT_FILE_ENV: ""
@@ -1866,6 +1877,123 @@ class TestDatastoreClient(unittest.TestCase):
         assert_equal(self.datastore.get_host_as(TEST_HOST), None)
 
 
+class TestDatastoreClientEndpoints(unittest.TestCase):
+
+    @patch("pycalico.datastore.os.getenv", autospec=True)
+    @patch("pycalico.datastore.etcd.Client", autospec=True)
+    def test_endpoints_single_override(self, m_etcd_client, m_getenv):
+        """ Test etcd endpoint overriding with a single endpoint."""
+        etcd_env_dict = {
+            ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
+            ETCD_SCHEME_ENV      : "https",
+            ETCD_ENDPOINTS_ENV   : "http://127.0.0.1:2379",
+            ETCD_KEY_FILE_ENV    : "",
+            ETCD_CERT_FILE_ENV   : "",
+            ETCD_CA_CERT_FILE_ENV: ""
+        }
+
+        def m_getenv_return(key, *args):
+            return etcd_env_dict[key]
+        m_getenv.side_effect = m_getenv_return
+        self.etcd_client = Mock(spec=EtcdClient)
+        m_etcd_client.return_value = self.etcd_client
+        self.datastore = DatastoreClient()
+        m_etcd_client.assert_called_once_with(host="127.0.0.1",
+                                              port=2379,
+                                              protocol="http",
+                                              cert=None,
+                                              ca_cert=None)
+
+    @patch("pycalico.datastore.os.getenv", autospec=True)
+    @patch("pycalico.datastore.etcd.Client", autospec=True)
+    def test_endpoints_multiple(self, m_etcd_client, m_getenv):
+        """ Test etcd endpoint overriding with multiple endpoints."""
+        etcd_env_dict = {
+            ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
+            ETCD_SCHEME_ENV      : "https",
+            ETCD_ENDPOINTS_ENV   : "http://127.0.0.1:2379, http://127.0.1.1:2381",
+            ETCD_KEY_FILE_ENV    : "",
+            ETCD_CERT_FILE_ENV   : "",
+            ETCD_CA_CERT_FILE_ENV: ""
+        }
+
+        def m_getenv_return(key, *args):
+            return etcd_env_dict[key]
+        m_getenv.side_effect = m_getenv_return
+        self.etcd_client = Mock(spec=EtcdClient)
+        m_etcd_client.return_value = self.etcd_client
+        self.datastore = DatastoreClient()
+        m_etcd_client.assert_called_once_with(host=(("127.0.0.1", 2379),
+                                                    ("127.0.1.1", 2381)),
+                                              protocol="http",
+                                              cert=None,
+                                              ca_cert=None,
+                                              allow_reconnect=True)
+
+    @patch("pycalico.datastore.os.getenv", autospec=True)
+    @patch("pycalico.datastore.etcd.Client", autospec=True)
+    def test_endpoints_proto_mismatch(self, m_etcd_client, m_getenv):
+        """ Test mismatched protocols in etcd endpoints."""
+        etcd_env_dict = {
+            ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
+            ETCD_SCHEME_ENV      : "https",
+            ETCD_ENDPOINTS_ENV   : "http://127.0.0.1:2379, https://127.0.1.1:2381",
+            ETCD_KEY_FILE_ENV    : "",
+            ETCD_CERT_FILE_ENV   : "",
+            ETCD_CA_CERT_FILE_ENV: ""
+        }
+
+        def m_getenv_return(key, *args):
+            return etcd_env_dict[key]
+        m_getenv.side_effect = m_getenv_return
+        self.etcd_client = Mock(spec=EtcdClient)
+        m_etcd_client.return_value = self.etcd_client
+        self.assertRaises(DataStoreError, DatastoreClient)
+        self.assertFalse(m_etcd_client.called)
+
+    @patch("pycalico.datastore.os.getenv", autospec=True)
+    @patch("pycalico.datastore.etcd.Client", autospec=True)
+    def test_endpoints_format_invalid(self, m_etcd_client, m_getenv):
+        """ Test invalid format of etcd endpoints."""
+        etcd_env_dict = {
+            ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
+            ETCD_SCHEME_ENV      : "https",
+            ETCD_ENDPOINTS_ENV   : "http:/ /127.0.0.1:2379\, https://127.0.1.1:2381",
+            ETCD_KEY_FILE_ENV    : "",
+            ETCD_CERT_FILE_ENV   : "",
+            ETCD_CA_CERT_FILE_ENV: ""
+        }
+
+        def m_getenv_return(key, *args):
+            return etcd_env_dict[key]
+        m_getenv.side_effect = m_getenv_return
+        self.etcd_client = Mock(spec=EtcdClient)
+        m_etcd_client.return_value = self.etcd_client
+        self.assertRaises(DataStoreError, DatastoreClient)
+        self.assertFalse(m_etcd_client.called)
+    @patch("pycalico.datastore.os.getenv", autospec=True)
+    @patch("pycalico.datastore.etcd.Client", autospec=True)
+
+    def test_endpoints_bad_proto(self, m_etcd_client, m_getenv):
+        """ Test bad protocol for etcd endpoints."""
+        etcd_env_dict = {
+            ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
+            ETCD_SCHEME_ENV      : "https",
+            ETCD_ENDPOINTS_ENV   : "ftp://127.0.0.1:2379",
+            ETCD_KEY_FILE_ENV    : "",
+            ETCD_CERT_FILE_ENV   : "",
+            ETCD_CA_CERT_FILE_ENV: ""
+        }
+
+        def m_getenv_return(key, *args):
+            return etcd_env_dict[key]
+        m_getenv.side_effect = m_getenv_return
+        self.etcd_client = Mock(spec=EtcdClient)
+        m_etcd_client.return_value = self.etcd_client
+        self.assertRaises(DataStoreError, DatastoreClient)
+        self.assertFalse(m_etcd_client.called)
+
+
 class TestSecureDatastoreClient(unittest.TestCase):
 
     @patch("pycalico.datastore.os.getenv", autospec=True)
@@ -1881,6 +2009,7 @@ class TestSecureDatastoreClient(unittest.TestCase):
         etcd_env_dict = {
             ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
             ETCD_SCHEME_ENV      : "https",
+            ETCD_ENDPOINTS_ENV   : "",
             ETCD_KEY_FILE_ENV    : "",
             ETCD_CERT_FILE_ENV   : "",
             ETCD_CA_CERT_FILE_ENV: ca_file
@@ -1912,6 +2041,7 @@ class TestSecureDatastoreClient(unittest.TestCase):
         etcd_env_dict = {
             ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
             ETCD_SCHEME_ENV      : "https",
+            ETCD_ENDPOINTS_ENV   : "",
             ETCD_KEY_FILE_ENV    : key_file,
             ETCD_CERT_FILE_ENV   : cert_file,
             ETCD_CA_CERT_FILE_ENV: ca_file
@@ -1943,6 +2073,7 @@ class TestSecureDatastoreClient(unittest.TestCase):
         etcd_env_dict = {
             ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
             ETCD_SCHEME_ENV      : "htt",
+            ETCD_ENDPOINTS_ENV   : "",
             ETCD_KEY_FILE_ENV    : "",
             ETCD_CERT_FILE_ENV   : "",
             ETCD_CA_CERT_FILE_ENV: ""
@@ -1971,6 +2102,7 @@ class TestSecureDatastoreClient(unittest.TestCase):
         etcd_env_dict = {
             ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
             ETCD_SCHEME_ENV      : "https",
+            ETCD_ENDPOINTS_ENV   : "",
             ETCD_KEY_FILE_ENV    : "/path/to/key_file",
             ETCD_CERT_FILE_ENV   : "",
             ETCD_CA_CERT_FILE_ENV: ""
@@ -1999,6 +2131,7 @@ class TestSecureDatastoreClient(unittest.TestCase):
         etcd_env_dict = {
             ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
             ETCD_SCHEME_ENV      : "https",
+            ETCD_ENDPOINTS_ENV   : "",
             ETCD_KEY_FILE_ENV    : "",
             ETCD_CERT_FILE_ENV   : "/path/to/cert_file",
             ETCD_CA_CERT_FILE_ENV: ""
@@ -2026,6 +2159,7 @@ class TestSecureDatastoreClient(unittest.TestCase):
         etcd_env_dict = {
             ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
             ETCD_SCHEME_ENV      : "https",
+            ETCD_ENDPOINTS_ENV   : "",
             ETCD_KEY_FILE_ENV    : "/path/to/key_dir/",
             ETCD_CERT_FILE_ENV   : "/path/to/cert_file",
             ETCD_CA_CERT_FILE_ENV: "/path/to/ca_file"
@@ -2054,6 +2188,7 @@ class TestSecureDatastoreClient(unittest.TestCase):
         etcd_env_dict = {
             ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
             ETCD_SCHEME_ENV      : "https",
+            ETCD_ENDPOINTS_ENV   : "",
             ETCD_KEY_FILE_ENV    : "/path/to/key_file",
             ETCD_CERT_FILE_ENV   : "/path/to/bad_cert",
             ETCD_CA_CERT_FILE_ENV: "/path/to/ca_file"
@@ -2082,6 +2217,7 @@ class TestSecureDatastoreClient(unittest.TestCase):
         etcd_env_dict = {
             ETCD_AUTHORITY_ENV   : "127.0.1.1:2380",
             ETCD_SCHEME_ENV      : "https",
+            ETCD_ENDPOINTS_ENV   : "",
             ETCD_KEY_FILE_ENV    : "/path/to/key_file",
             ETCD_CERT_FILE_ENV   : "/path/to/cert_file",
             ETCD_CA_CERT_FILE_ENV: "/path/to/not_readable"
