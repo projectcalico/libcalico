@@ -10,6 +10,7 @@ default: all
 all: test
 wheel: dist/pycalico-$(WHEEL_VERSION)-py2-none-any.whl
 test: ut
+build-container: calicobuild.created
 
 update-frozen:
 	cp build-requirements.txt build-requirements-frozen.txt

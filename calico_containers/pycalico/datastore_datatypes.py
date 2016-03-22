@@ -40,6 +40,18 @@ class Rules(namedtuple("Rules", ["id", "inbound_rules", "outbound_rules"])):
     A set of Calico rules describing inbound and outbound network traffic
     policy.
     """
+    def to_dict(self):
+        """
+        Convert the Rules object to a dictionary. 
+
+        :return:  A dictionary representation of this object.
+        """
+        json_dict = self._asdict()
+        rules = json_dict["inbound_rules"]
+        json_dict["inbound_rules"] = [rule.to_json_dict() for rule in rules]
+        rules = json_dict["outbound_rules"]
+        json_dict["outbound_rules"] = [rule.to_json_dict() for rule in rules]
+        return json_dict
 
     def to_json(self, indent=None):
         """
@@ -50,12 +62,7 @@ class Rules(namedtuple("Rules", ["id", "inbound_rules", "outbound_rules"])):
         using 1 for human-readable strings.
         :return:  A JSON string representation of this object.
         """
-        json_dict = self._asdict()
-        rules = json_dict["inbound_rules"]
-        json_dict["inbound_rules"] = [rule.to_json_dict() for rule in rules]
-        rules = json_dict["outbound_rules"]
-        json_dict["outbound_rules"] = [rule.to_json_dict() for rule in rules]
-        return json.dumps(json_dict, indent=indent)
+        return json.dumps(self.to_dict(), indent=indent)
 
     @classmethod
     def from_json(cls, json_str):
@@ -241,11 +248,14 @@ class Endpoint(object):
         self.profile_ids = []
         self._original_json = None
 
+        self.labels =  {}
+
     def to_json(self):
         json_dict = {"state": self.state,
                      "name": self.name,
                      "mac": self.mac,
                      "profile_ids": self.profile_ids,
+                     "labels": self.labels,
                      "ipv4_nets": sorted([str(net) for net in self.ipv4_nets]),
                      "ipv6_nets": sorted([str(net) for net in self.ipv6_nets]),
                      "ipv4_gateway": str(self.ipv4_gateway) if
@@ -287,6 +297,8 @@ class Endpoint(object):
         ipv6_gw = json_dict.get("ipv6_gateway")
         if ipv6_gw:
             ep.ipv6_gateway = IPAddress(ipv6_gw)
+        labels = json_dict.get("labels", {})
+        ep.labels = labels
 
         # Version controlled fields
         profile_id = json_dict.get("profile_id", None)
@@ -398,6 +410,30 @@ class Profile(object):
         self.rules = Rules(name, [], [])
 
 
+class Policy(object):
+    """A Calico policy."""
+    def __init__(self, tier_name, policy_name):
+        self.tier_name = tier_name
+        self.policy_name = policy_name
+        self.order = 0 
+
+        # Default to empty lists of rules.
+        self.rules = Rules(policy_name, [], [])
+
+        # Default to empty selector.
+        self.selector = ""
+
+    def to_json(self):
+        """
+        Returns a json string representing this Policy
+        as stored in the data store.
+        """
+        data = {"order": self.order,
+                "selector": self.selector}
+        data.update(self.rules.to_dict())
+        return json.dumps(data)
+
+
 class Rule(dict):
     """
     A Calico inbound or outbound traffic rule.
@@ -405,9 +441,11 @@ class Rule(dict):
 
     ALLOWED_KEYS = ["protocol",
                     "src_tag",
+                    "src_selector",
                     "src_ports",
                     "src_net",
                     "dst_tag",
+                    "dst_selector",
                     "dst_ports",
                     "dst_net",
                     "icmp_type",
