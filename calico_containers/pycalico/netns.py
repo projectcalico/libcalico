@@ -24,6 +24,8 @@ from copy import copy
 from subprocess32 import check_output, check_call, CalledProcessError, STDOUT
 from netaddr import IPAddress
 
+from pycalico.util import IPV6_RE
+
 _log = logging.getLogger(__name__)
 _log.addHandler(logging.NullHandler())
 
@@ -182,23 +184,52 @@ def set_veth_mac(veth_name_host, mac):
                timeout=IP_CMD_TIMEOUT)
 
 
-def add_ns_default_route(namespace, next_hop, veth_name_ns):
+def add_ns_default_route(namespace, veth_name_host, veth_name_ns):
     """
     Add a default route to the namespace.
 
+    For IPv4:
+    Use the first link local address as the dummy address.
+    This only ever appears in an ARP packet.
+    The host has proxy arp configured on the other end of the veth so
+    will respond with the MAC of the veth
+
+    For IPv6:
+    Use the link local address of the host end of the veth.
+    This doesn't require proxy NDP (though currently felix still enables
+    it).
+
     :param namespace: The namespace to operate in.
     :type namespace Namespace
-    :param next_hop: The next hop IP used as the default route in the namespace.
+    :param veth_name_host: The name of the interface in the host.
     :param veth_name_ns: The name of the interface in the namespace.
     :return: None. Raises CalledProcessError on error.
     """
-    assert isinstance(next_hop, IPAddress)
+    # Attempt to fetch the IPv6 address for the host veth. Failure indicates
+    # that this host doesn't support IPv6.
+    next_hop_6 = None
+    try:
+        ip_addr_output = check_output(["ip", "-6", "addr", "show", "dev", veth_name_host])
+        next_hop_6 = re.search(IPV6_RE, ip_addr_output).group(1)
+    except (CalledProcessError, OSError, AttributeError) as e:
+        _log.debug("Failed to get IPv6 address for veth %s. Error: %s",
+                   veth_name_host, e)
+
     with NamedNamespace(namespace) as ns:
+        # IPv4
+        dummy_next_hop_4 = "169.254.1.1"
         # Connected route to next hop & default route.
-        ns.check_output(["ip", "-%s" % next_hop.version, "route", "replace",
-                       str(next_hop), "dev", veth_name_ns])
-        ns.check_output(["ip", "-%s" % next_hop.version, "route", "replace",
-                      "default", "via", str(next_hop), "dev", veth_name_ns])
+        ns.check_output(["ip", "-4", "route", "replace",
+                         dummy_next_hop_4, "dev", veth_name_ns])
+        ns.check_output(["ip", "-4", "route", "replace", "default",
+                         "via", dummy_next_hop_4, "dev", veth_name_ns])
+
+        if next_hop_6:
+            # Only set the IPv6 route if the host end of the veth got an IPv6
+            # address. There's no need to set a device route as the container
+            # Will already have a /64 to the link local range.
+            ns.check_output(["ip", "-6", "route", "replace", "default",
+                             "via", next_hop_6, "dev", veth_name_ns])
 
 
 def get_ns_veth_mac(namespace, veth_name_ns):

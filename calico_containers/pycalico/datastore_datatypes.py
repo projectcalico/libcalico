@@ -242,13 +242,11 @@ class Endpoint(object):
 
         self.ipv4_nets = set()
         self.ipv6_nets = set()
-        self.ipv4_gateway = None
-        self.ipv6_gateway = None
 
         self.profile_ids = []
         self._original_json = None
 
-        self.labels =  {}
+        self.labels = {}
 
     def to_json(self):
         json_dict = {"state": self.state,
@@ -257,11 +255,7 @@ class Endpoint(object):
                      "profile_ids": self.profile_ids,
                      "labels": self.labels,
                      "ipv4_nets": sorted([str(net) for net in self.ipv4_nets]),
-                     "ipv6_nets": sorted([str(net) for net in self.ipv6_nets]),
-                     "ipv4_gateway": str(self.ipv4_gateway) if
-                                     self.ipv4_gateway else None,
-                     "ipv6_gateway": str(self.ipv6_gateway) if
-                                     self.ipv6_gateway else None}
+                     "ipv6_nets": sorted([str(net) for net in self.ipv6_nets])}
         return json.dumps(json_dict)
 
     @classmethod
@@ -291,12 +285,6 @@ class Endpoint(object):
             ep.ipv4_nets.add(IPNetwork(net))
         for net in json_dict["ipv6_nets"]:
             ep.ipv6_nets.add(IPNetwork(net))
-        ipv4_gw = json_dict.get("ipv4_gateway")
-        if ipv4_gw:
-            ep.ipv4_gateway = IPAddress(ipv4_gw)
-        ipv6_gw = json_dict.get("ipv6_gateway")
-        if ipv6_gw:
-            ep.ipv6_gateway = IPAddress(ipv6_gw)
         labels = json_dict.get("labels", {})
         ep.labels = labels
 
@@ -358,12 +346,8 @@ class Endpoint(object):
                                 veth_name_ns)
         for ip_net in self.ipv4_nets | self.ipv6_nets:
             netns.add_ip_to_ns_veth(namespace, ip_net.ip, veth_name_ns)
-            if ip_net.ip.version == 4:
-                netns.add_ns_default_route(namespace, self.ipv4_gateway,
-                                           veth_name_ns)
-            else:
-                netns.add_ns_default_route(namespace, self.ipv6_gateway,
-                                           veth_name_ns)
+
+        netns.add_ns_default_route(namespace, self.name, veth_name_ns)
 
         return netns.get_ns_veth_mac(namespace, veth_name_ns)
 
@@ -375,9 +359,7 @@ class Endpoint(object):
                 self.mac == other.mac and
                 self.profile_ids == other.profile_ids and
                 self.ipv4_nets == other.ipv4_nets and
-                self.ipv6_nets == other.ipv6_nets and
-                self.ipv4_gateway == other.ipv4_gateway and
-                self.ipv6_gateway == other.ipv6_gateway)
+                self.ipv6_nets == other.ipv6_nets)
 
     def __ne__(self, other):
         result = self.__eq__(other)
