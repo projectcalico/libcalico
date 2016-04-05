@@ -1281,21 +1281,13 @@ class DatastoreClient(object):
                       endpoint_id=uuid.uuid1().hex,
                       state="active",
                       mac=mac)
-        next_hops = self.get_default_next_hops(hostname)
 
         for ip in ip_list:
-            try:
-                next_hop = next_hops[ip.version]
-            except KeyError:
-                raise AddrFormatError("This node is not configured for IPv%d."
-                                       % ip.version)
             network = IPNetwork(ip)
             if network.version == 4:
                 ep.ipv4_nets.add(network)
-                ep.ipv4_gateway = next_hop
             else:
                 ep.ipv6_nets.add(network)
-                ep.ipv6_gateway = next_hop
 
         return ep
 
@@ -1311,40 +1303,6 @@ class DatastoreClient(object):
                                    "workload_id": endpoint.workload_id,
                                    "endpoint_id": endpoint.endpoint_id}
         self.etcd_client.delete(ep_path, dir=True, recursive=True)
-
-    @handle_errors
-    def get_default_next_hops(self, hostname):
-        """
-        Get the next hop IP addresses for default routes on the given host.
-
-        :param hostname: The hostname for which to get default route next hops.
-        :return: Dict of {ip_version: IPAddress}
-        """
-
-        bgp_ipv4 = BGP_HOST_IPV4_PATH % {"hostname": hostname}
-        bgp_ipv6 = BGP_HOST_IPV6_PATH % {"hostname": hostname}
-        try:
-            ipv4 = self.etcd_client.read(bgp_ipv4).value
-            ipv6 = self.etcd_client.read(bgp_ipv6).value
-        except EtcdKeyNotFound:
-            raise KeyError("BGP configuration for host %s not found." %
-                           hostname)
-
-        next_hops = {}
-
-        # The IP addresses read from etcd could be blank. Only store them if
-        # they can be parsed by IPAddress
-        try:
-            next_hops[4] = IPAddress(ipv4)
-        except AddrFormatError:
-            pass
-
-        try:
-            next_hops[6] = IPAddress(ipv6)
-        except AddrFormatError:
-            pass
-
-        return next_hops
 
     @handle_errors
     def remove_all_data(self):

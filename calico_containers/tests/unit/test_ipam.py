@@ -29,8 +29,9 @@ from pycalico.block import AllocationBlock, AddressNotAssignedError, BLOCK_SIZE
 from pycalico.handle import AllocationHandle, AddressCountTooLow
 from pycalico.datastore import IPAM_CONFIG_PATH
 from pycalico.datastore_datatypes import IPPool, IPAMConfig
-from block_test import (_test_block_empty_v4, _test_block_empty_v6,
-                        BLOCK_V6_1, BLOCK_V4_1, _test_block_not_empty_v4)
+from tests.unit.test_block import (_test_block_empty_v4, _test_block_empty_v6,
+                         BLOCK_V6_1, BLOCK_V4_1, _test_block_not_empty_v4)
+from tests.unit.test_block import BLOCK_V4_1
 
 network = IPNetwork("192.168.25.0/24")
 BLOCK_V4_2 = IPNetwork("10.11.45.0/26")
