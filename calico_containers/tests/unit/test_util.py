@@ -14,6 +14,7 @@
 
 import unittest
 from mock import patch
+from netaddr import IPAddress
 from subprocess import CalledProcessError, check_output
 from pycalico.util import get_host_ips, validate_characters, validate_ports, validate_icmp_type, validate_hostname_port, \
     validate_cidr_versions, validate_ip, validate_cidr
@@ -91,16 +92,18 @@ class TestUtil(unittest.TestCase):
         addrs = get_host_ips(version=4)
         m_check_output.assert_called_once_with(["ip", "-4", "addr"])
         m_check_output.reset_mock()
-        self.assertEquals(addrs, ['172.24.114.18', '172.17.42.1'])
+        self.assertEquals(addrs, [IPAddress('172.24.114.18'),
+                                  IPAddress('172.17.42.1')])
 
         # Test IPv6
         addrs = get_host_ips(version=6)
         m_check_output.assert_called_once_with(["ip", "-6", "addr"])
         m_check_output.reset_mock()
-        self.assertEquals(addrs, ['2620:104:4008:69:8d7c:499f:2f04:9e55',
-                                  '2620:104:4008:69:a00:27ff:fe73:c8d0',
-                                  'fe80::a00:27ff:fe73:c8d0',
-                                  'fe80::188f:d6ff:fe1f:1482'])
+        self.assertEquals(addrs,
+                          [IPAddress('2620:104:4008:69:8d7c:499f:2f04:9e55'),
+                           IPAddress('2620:104:4008:69:a00:27ff:fe73:c8d0'),
+                           IPAddress('fe80::a00:27ff:fe73:c8d0'),
+                           IPAddress('fe80::188f:d6ff:fe1f:1482')])
 
     @patch("pycalico.util.check_output", autospec=True)
     def test_get_host_ips_loopback_only(self, m_check_output):
@@ -126,15 +129,16 @@ class TestUtil(unittest.TestCase):
         addrs = get_host_ips(version=4, exclude=["docker0"])
         m_check_output.assert_called_once_with(["ip", "-4", "addr"])
         m_check_output.reset_mock()
-        self.assertEquals(addrs, ['172.24.114.18'])
+        self.assertEquals(addrs, [IPAddress('172.24.114.18')])
 
         # Test IPv6
         addrs = get_host_ips(version=6, exclude=["docker0"])
         m_check_output.assert_called_once_with(["ip", "-6", "addr"])
         m_check_output.reset_mock()
-        self.assertEquals(addrs, ['2620:104:4008:69:8d7c:499f:2f04:9e55',
-                                  '2620:104:4008:69:a00:27ff:fe73:c8d0',
-                                  'fe80::a00:27ff:fe73:c8d0'])
+        self.assertEquals(addrs,
+                          [IPAddress('2620:104:4008:69:8d7c:499f:2f04:9e55'),
+                           IPAddress('2620:104:4008:69:a00:27ff:fe73:c8d0'),
+                           IPAddress('fe80::a00:27ff:fe73:c8d0')])
 
     @patch("pycalico.util.check_output", autospec=True)
     def test_get_host_ips_exclude_empty(self, m_check_output):
@@ -144,16 +148,18 @@ class TestUtil(unittest.TestCase):
         addrs = get_host_ips(version=4, exclude=["^$"])
         m_check_output.assert_called_once_with(["ip", "-4", "addr"])
         m_check_output.reset_mock()
-        self.assertEquals(addrs, ['172.24.114.18', '172.17.42.1'])
+        self.assertEquals(addrs, [IPAddress('172.24.114.18'),
+                                  IPAddress('172.17.42.1')])
 
         # Test IPv6
         addrs = get_host_ips(version=6, exclude=["^$"])
         m_check_output.assert_called_once_with(["ip", "-6", "addr"])
         m_check_output.reset_mock()
-        self.assertEquals(addrs, ['2620:104:4008:69:8d7c:499f:2f04:9e55',
-                                  '2620:104:4008:69:a00:27ff:fe73:c8d0',
-                                  'fe80::a00:27ff:fe73:c8d0',
-                                  'fe80::188f:d6ff:fe1f:1482'])
+        self.assertEquals(addrs,
+                          [IPAddress('2620:104:4008:69:8d7c:499f:2f04:9e55'),
+                           IPAddress('2620:104:4008:69:a00:27ff:fe73:c8d0'),
+                           IPAddress('fe80::a00:27ff:fe73:c8d0'),
+                           IPAddress('fe80::188f:d6ff:fe1f:1482')])
 
     @patch("pycalico.util.check_output", autospec=True)
     def test_get_host_ips_exclude_docker_prefix(self, m_check_output):
@@ -163,15 +169,16 @@ class TestUtil(unittest.TestCase):
         addrs = get_host_ips(version=4, exclude=["docker0.*"])
         m_check_output.assert_called_once_with(["ip", "-4", "addr"])
         m_check_output.reset_mock()
-        self.assertEquals(addrs, ['172.24.114.18'])
+        self.assertEquals(addrs, [IPAddress('172.24.114.18')])
 
         # Test IPv6
         addrs = get_host_ips(version=6, exclude=["docker0.*"])
         m_check_output.assert_called_once_with(["ip", "-6", "addr"])
         m_check_output.reset_mock()
-        self.assertEquals(addrs, ['2620:104:4008:69:8d7c:499f:2f04:9e55',
-                                  '2620:104:4008:69:a00:27ff:fe73:c8d0',
-                                  'fe80::a00:27ff:fe73:c8d0'])
+        self.assertEquals(addrs,
+                          [IPAddress('2620:104:4008:69:8d7c:499f:2f04:9e55'),
+                           IPAddress('2620:104:4008:69:a00:27ff:fe73:c8d0'),
+                           IPAddress('fe80::a00:27ff:fe73:c8d0')])
 
     @patch("pycalico.util.check_output", autospec=True)
     def test_get_host_ips_fail_check_output(self, m_check_output):
