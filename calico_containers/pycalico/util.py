@@ -6,7 +6,7 @@ import sys
 import os
 import re
 import logging
-from netaddr import IPNetwork
+from netaddr import IPNetwork, IPAddress
 from subprocess import check_output, CalledProcessError
 
 _log = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ def get_host_ips(version=4, exclude=None):
     :param version: Desired IP address version. Can be 4 or 6. defaults to 4
     :param exclude: list of interface name regular expressions to ignore
                     (ex. ["^lo$","docker0.*"])
-    :return: List of string representations of IP Addresses.
+    :return: List of IPAddress objects.
     """
     exclude = exclude or []
     ip_addrs = []
@@ -81,7 +81,7 @@ def get_host_ips(version=4, exclude=None):
             for address in ip_re.findall(iface_block):
                 # Append non-loopback addresses.
                 if not IPNetwork(address).ip.is_loopback():
-                    ip_addrs.append(address)
+                    ip_addrs.append(IPAddress(address))
 
     return ip_addrs
 
