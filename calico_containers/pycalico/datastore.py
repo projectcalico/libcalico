@@ -265,13 +265,11 @@ class DatastoreClient(object):
         # watch appropriate directory trees).
         host = get_hostname()
         for version in (4, 6):
-            path = IPAM_HOST_AFFINITY_PATH % {"host": host,
-                                              "version": version}
-            try:
-                self.etcd_client.write(path, None, dir=True)
-            except EtcdNotFile:
-                # Directory already exists.
-                pass
+            affinity_path = IPAM_HOST_AFFINITY_PATH % {"host": host,
+                                                       "version": version}
+            pool_path = IP_POOLS_PATH % {"version": version}
+            self._write_global_dir(affinity_path)
+            self._write_global_dir(pool_path)
 
         # Configure BGP global (default) config if it doesn't exist.
         self._write_global_config(BGP_NODE_DEF_AS_PATH, str(DEFAULT_AS_NUM))
@@ -302,6 +300,17 @@ class DatastoreClient(object):
             self.etcd_client.read(key)
         except EtcdKeyNotFound:
             self.etcd_client.write(key, value)
+
+    def _write_global_dir(self, key):
+        """
+        Write a global directory to the datastore if it does not already exist.
+        :param key: The directory key.
+        """
+        try:
+            self.etcd_client.write(key, None, dir=True)
+        except EtcdNotFile:
+            # Directory already exists.
+            pass
 
     @handle_errors
     def create_host(self, hostname, ipv4, ipv6, as_num):

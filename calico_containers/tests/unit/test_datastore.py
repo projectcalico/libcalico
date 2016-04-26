@@ -562,7 +562,9 @@ class TestDatastoreClient(unittest.TestCase):
 
         expected_writes = [call(int_prefix_path, "cali"),
                            call(IPAM_V4_PATH, None, dir=True),
+                           call(IPV4_POOLS_PATH, None, dir=True),
                            call(IPAM_V6_PATH, None, dir=True),
+                           call(IPV6_POOLS_PATH, None, dir=True),
                            call(BGP_NODE_DEF_AS_PATH, "64511"),
                            call(BGP_NODE_MESH_PATH, json.dumps({"enabled": True})),
                            call(log_file_path, "none"),
@@ -597,7 +599,9 @@ class TestDatastoreClient(unittest.TestCase):
 
         expected_writes = [call(int_prefix_path, "cali"),
                            call(IPAM_V4_PATH, None, dir=True),
+                           call(IPV4_POOLS_PATH, None, dir=True),
                            call(IPAM_V6_PATH, None, dir=True),
+                           call(IPV6_POOLS_PATH, None, dir=True),
                            call(BGP_NODE_DEF_AS_PATH, "64511"),
                            call(BGP_NODE_MESH_PATH, json.dumps({"enabled": True})),
                            call(log_file_path, "none"),
