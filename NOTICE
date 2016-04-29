@@ -1,0 +1,3 @@
+The _random_subnets_from_cidr() function in calico_containers/pycalico/ipam.py
+is derived from code in the netaddr library, which is distributed under the
+3-clause BSD license, see copyright and notices in licenses/netaddr.

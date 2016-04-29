@@ -23,7 +23,8 @@ from etcd import EtcdResult, Client, EtcdAlreadyExist, EtcdKeyNotFound, EtcdComp
 from pycalico.ipam import (IPAMClient, BlockHandleReaderWriter,
                            CASError, NoFreeBlocksError, _block_datastore_key,
                            _handle_datastore_key, HostAffinityClaimedError,
-                           IPAMConfigConflictError)
+                           IPAMConfigConflictError, _random_subnets_from_cidr,
+                           _random_subnets_from_cidrs)
 from pycalico.datastore_errors import PoolNotFound, InvalidBlockSizeError
 from pycalico.block import AllocationBlock, AddressNotAssignedError, BLOCK_SIZE
 from pycalico.handle import AllocationHandle, AddressCountTooLow
@@ -37,6 +38,18 @@ network = IPNetwork("192.168.25.0/24")
 BLOCK_V4_2 = IPNetwork("10.11.45.0/26")
 BLOCK_V4_3 = IPNetwork("10.11.47.0/26")
 TEST_HOST = "test_host1"
+
+
+def gen_subnets(cidrs, prefixlen, seed=None):
+    """
+    Non-random replacement for _random_subnets_from_cidrs, allows for
+    easier UT.
+    """
+    hash(seed)  # Seed should be hashable.
+    for cidr in cidrs:
+        for subnet in cidr.subnet(prefixlen):
+            yield subnet
+
 
 class TestIPAMClient(unittest.TestCase):
 
@@ -498,7 +511,9 @@ class TestIPAMClient(unittest.TestCase):
             for ip in ipv4s:
                 assert_true(ip in BLOCK_V4_3)
 
-    def test_auto_assign_affinity_key_err_retries(self):
+    @patch("pycalico.ipam._random_subnets_from_cidrs",
+           side_effect=gen_subnets)
+    def test_auto_assign_affinity_key_err_retries(self, m_rand_subnets):
         """
         Test auto assign when _get_affine_blocks returns some blocks that
         don't exist and we hit the maximum number of retries.
@@ -1374,6 +1389,7 @@ class TestIPAMClient(unittest.TestCase):
                 recursive=True, dir=True
             )
 
+
 class TestBlockHandleReaderWriter(unittest.TestCase):
 
     def setUp(self):
@@ -1638,7 +1654,9 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
             "/calico/ipam/v2/host/test_host1/ipv4/block/%s" %
             str(BLOCK_V4_1).replace("/", "-"))
 
-    def test_new_affine_block_race(self):
+    @patch("pycalico.ipam._random_subnets_from_cidrs",
+           side_effect=gen_subnets)
+    def test_new_affine_block_race(self, m_rand_subn):
         """
         Test _new_affine_block when another host claims it between reading
         and writing.
@@ -1700,7 +1718,9 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
                 call(key1, value1, prevExist=False)
             ])
 
-    def test_new_affine_block_bad_pool(self):
+    @patch("pycalico.ipam._random_subnets_from_cidrs",
+           side_effect=gen_subnets)
+    def test_new_affine_block_bad_pool(self, m_rand_subn):
         """
         Test _new_affine_block when the pool given doesn't match.
         """
@@ -1716,7 +1736,9 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
                           self.client._new_affine_block,
                           "test_host1", 4, IPPool("10.11.0.0/8"), IPAMConfig())
 
-    def test_new_affine_block_good_pool(self):
+    @patch("pycalico.ipam._random_subnets_from_cidrs",
+           side_effect=gen_subnets)
+    def test_new_affine_block_good_pool(self, m_rand_subn):
         """
         Test _new_affine_block limits to a single pool if requested.
         """
@@ -1788,7 +1810,9 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
 
         with patch("pycalico.datastore.DatastoreClient.get_ip_pools",
                    m_get_ip_pools):
-            random_blocks = self.client._random_blocks(excluded_ids, 4, None)
+            random_blocks = list(
+                self.client._random_blocks(4, None, excluded_ids)
+            )
 
             # Excluded 3, but only 2 in the pool, so 1024 - 2 = 1022 blocks.
             assert_equal(len(random_blocks), 1022)
@@ -1805,7 +1829,9 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
 
             # check we aren't doing something stupid, like returning the same
             # order every time.
-            random_blocks2 = self.client._random_blocks(excluded_ids, 4, None)
+            random_blocks2 = list(
+                self.client._random_blocks(4, None, excluded_ids)
+            )
             assert_equal(len(random_blocks2), 1022)
 
             differs = False
@@ -1828,8 +1854,8 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
 
         with patch("pycalico.datastore.DatastoreClient.get_ip_pools",
                    m_get_ip_pools):
-            assert_raises(PoolNotFound, self.client._random_blocks,
-                          [], 4, IPPool("10.1.0.0/16"))
+            blocks = self.client._random_blocks(4, IPPool("10.1.0.0/16"), [])
+            assert_raises(PoolNotFound, list, blocks)
 
     def test_random_blocks_good_pool(self):
         """
@@ -1847,8 +1873,10 @@ class TestBlockHandleReaderWriter(unittest.TestCase):
 
         with patch("pycalico.datastore.DatastoreClient.get_ip_pools",
                    m_get_ip_pools):
-            random_blocks = self.client._random_blocks(excluded_ids, 4,
-                                                       IPPool("10.11.0.0/16"))
+            ip_pool = IPPool("10.11.0.0/16")
+            random_blocks = list(
+                self.client._random_blocks(4, ip_pool, excluded_ids)
+            )
 
             # Excluded 3, but only 2 in the pool, so 1024 - 2 = 1022 blocks.
             assert_equal(len(random_blocks), 1022)
@@ -2203,3 +2231,89 @@ class TestIPAMConfig(unittest.TestCase):
 
         cfg1 = IPAMConfig.from_json(cfg0.to_json())
         self.assertEquals(cfg0, cfg1)
+
+
+class TestUtilityFunctions(unittest.TestCase):
+    def test_random_subnets_from_cidr(self):
+        for inputlen in xrange(16, 32):
+            for subnet_len in xrange(inputlen, 33, 3):
+                cidr = IPNetwork("10.0.0.1/%s" % inputlen)
+                rand_subnets = list(_random_subnets_from_cidr(cidr, subnet_len))
+                exp_subnets = list(cidr.subnet(subnet_len))
+                # Should generate the same values as the ordered subnet call.
+                self.assertEqual(set(rand_subnets), set(exp_subnets))
+                # And exactly the same number of values.
+                self.assertEqual(len(rand_subnets), len(exp_subnets))
+
+    def test_random_subnets_from_cidr_bad_prefixlen(self):
+        with self.assertRaises(ValueError):
+            next(_random_subnets_from_cidr(IPNetwork("10.0.0.1/16"), -1))
+        with self.assertRaises(ValueError):
+            next(_random_subnets_from_cidr(IPNetwork("10.0.0.1/16"), 33))
+        self.assertEqual(
+            list(_random_subnets_from_cidr(IPNetwork("10.0.0.0/16"), 15)),
+            []
+        )
+
+    def test_random_subnets_from_cidr_interleaves(self):
+        subnets = list(_random_subnets_from_cidrs([IPNetwork("10.0.0.0/16"),
+                                                   IPNetwork("11.0.0.0/16")],
+                                                  17))
+        self.assertEqual(len(subnets), 4)
+        self.assertEqual(set(subnets), {IPNetwork("10.0.0.0/17"),
+                                        IPNetwork("10.0.128.0/17"),
+                                        IPNetwork("11.0.0.0/17"),
+                                        IPNetwork("11.0.128.0/17")})
+        # If the first was in 10/8 then the second should be from 11/8
+        first_is_in_10 = subnets[0] in IPNetwork("10.0.0.0/16")
+        second_is_in_10 = subnets[1] in IPNetwork("10.0.0.0/16")
+        self.assertNotEqual(first_is_in_10, second_is_in_10)
+
+    def test_random_subnets_from_cidr_non_equal_prefixlen(self):
+        subnets = list(_random_subnets_from_cidrs([IPNetwork("10.0.0.0/16"),
+                                                   IPNetwork("11.0.0.0/17")],
+                                                  17))
+        self.assertEqual(len(subnets), 3)
+        self.assertEqual(set(subnets), {IPNetwork("10.0.0.0/17"),
+                                        IPNetwork("10.0.128.0/17"),
+                                        IPNetwork("11.0.0.0/17")})
+        # If the first was in 10/8 then the second should be from 11/8
+        first_is_in_10 = subnets[0] in IPNetwork("10.0.0.0/16")
+        second_is_in_10 = subnets[1] in IPNetwork("10.0.0.0/16")
+        self.assertNotEqual(first_is_in_10, second_is_in_10)
+
+    def test_random_subnets_from_cidr_seeding(self):
+        # Same seed should always give same result:
+        subnets = list(
+            _random_subnets_from_cidrs(
+                [IPNetwork("10.0.0.0/16"), IPNetwork("11.0.0.0/16")],
+                17,
+                seed="some-hostname"
+            )
+        )
+        subnets2 = list(
+            _random_subnets_from_cidrs(
+                [IPNetwork("10.0.0.0/16"), IPNetwork("11.0.0.0/16")],
+                17,
+                seed="some-hostname"
+            )
+        )
+
+        # But it should be very likely that different seeds give different
+        # results
+        self.assertEqual(subnets, subnets2)
+        num_seeds = 10
+        for x in xrange(num_seeds):
+            subnets3 = list(
+                _random_subnets_from_cidrs(
+                    [IPNetwork("10.0.0.0/16"), IPNetwork("11.0.0.0/16")],
+                    17,
+                    seed="some-hostname%s" % x
+                )
+            )
+            if subnets != subnets3:
+                break
+        else:
+            self.fail("Tried %s different seeds but "
+                      "_random_subnets_from_cidrs always gave same result" %
+                      num_seeds)

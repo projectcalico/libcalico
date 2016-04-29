@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from collections import deque
 
 from etcd import EtcdKeyNotFound, EtcdAlreadyExist, EtcdCompareFailed
 
@@ -181,34 +182,29 @@ class BlockHandleReaderWriter(DatastoreClient):
         :param ipam_config: The global IPAM configuration.
         :return: The block CIDR of the new block.
         """
-        # Get the pools and verify we got a valid one, or none.
-        ip_pools = self.get_ip_pools(version, ipam=True, include_disabled=False)
-        if pool is not None:
-            if pool not in ip_pools:
-                raise PoolNotFound("Requested pool %s is not configured or has"
-                                   "wrong attributes" % pool)
-            # Confine search to only the one pool.
-            ip_pools = [pool]
-
-        for pool in ip_pools:
-            for block_cidr in pool.cidr.subnet(BLOCK_PREFIXLEN[version]):
-                block_id = str(block_cidr)
-                _log.debug("Checking if block %s is free.", block_id)
-                key = _block_datastore_key(block_cidr)
+        # Walk the affine blocks in a somewhat random way but seed the RNG
+        # from our hostname so that multiple concurrent invocations on the
+        # same host will try to claim the same blocks.
+        for block_cidr in self._random_blocks(version=version,
+                                              pool=pool,
+                                              seed=host):
+            block_id = str(block_cidr)
+            _log.debug("Checking if block %s is free.", block_id)
+            key = _block_datastore_key(block_cidr)
+            try:
+                _ = self.etcd_client.read(key, quorum=True)
+            except EtcdKeyNotFound:
+                _log.debug("Found block %s free.", block_id)
                 try:
-                    _ = self.etcd_client.read(key, quorum=True)
-                except EtcdKeyNotFound:
-                    _log.debug("Found block %s free.", block_id)
-                    try:
-                        self._claim_block_affinity(host, block_cidr,
-                                                   ipam_config)
-                    except HostAffinityClaimedError:
-                        # Failed to claim the block because some other host
-                        # has it.
-                        _log.debug("Failed to claim block %s", block_cidr)
-                        continue
-                    # Success!
-                    return block_cidr
+                    self._claim_block_affinity(host, block_cidr,
+                                               ipam_config)
+                except HostAffinityClaimedError:
+                    # Failed to claim the block because some other host
+                    # has it.
+                    _log.debug("Failed to claim block %s", block_cidr)
+                    continue
+                # Success!
+                return block_cidr
         raise NoFreeBlocksError()
 
     def _claim_block_affinity(self, host, block_cidr, ipam_config):
@@ -302,16 +298,18 @@ class BlockHandleReaderWriter(DatastoreClient):
 
         raise RuntimeError("Max retries hit.")  # pragma: no cover
 
-    def _random_blocks(self, excluded_ids, version, pool):
+    def _random_blocks(self, version, pool=None, excluded_ids=None, seed=None):
         """
-        Get an list of block CIDRs, in random order.
+        Generate block CIDRs, in pseudo-random order.
 
-        :param excluded_ids: List of IDs that should be excluded.
         :param version: The IP version 4, or 6.
         :param pool: IPPool to get blocks from, or None to use all pools
+        :param excluded_ids: Set of IDs that should be excluded or None.
+        :param seed: Seed for the RNG, or None to have the RNG self-seed.
+        :raises PoolNotFound if pool is set to a non-existent pool.
         :return: An iterator of block CIDRs.
         """
-
+        excluded_ids = excluded_ids or set()
         # Get the pools and verify we got a valid one, or none.
         ip_pools = self.get_ip_pools(version, ipam=True, include_disabled=False)
         if pool is not None:
@@ -320,23 +318,12 @@ class BlockHandleReaderWriter(DatastoreClient):
                                    "wrong attributes" % pool)
             # Confine search to only the one pool.
             ip_pools = [pool]
-
-        random_blocks = []
-        i = 0
-        for pool in ip_pools:
-            for block_cidr in pool.cidr.subnet(BLOCK_PREFIXLEN[version]):
-                if block_cidr not in excluded_ids:
-                    # add this block.  We use an "inside-out" Fisher-Yates
-                    # shuffle to randomize the list as we create it.  See
-                    # http://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
-                    j = random.randint(0, i)
-                    if j != i:
-                        random_blocks.append(random_blocks[j])
-                        random_blocks[j] = block_cidr
-                    else:
-                        random_blocks.append(block_cidr)
-                    i += 1
-        return random_blocks
+        cidrs = [p.cidr for p in ip_pools]
+        for block_cidr in _random_subnets_from_cidrs(cidrs,
+                                                     BLOCK_PREFIXLEN[version],
+                                                     seed=seed):
+            if block_cidr not in excluded_ids:
+                yield block_cidr
 
     def _increment_handle(self, handle_id, block_cidr, amount):
         """
@@ -649,25 +636,91 @@ class IPAMClient(BlockHandleReaderWriter):
         :return:
         """
         assert isinstance(handle_id, str) or handle_id is None
-
         # Start by trying to assign from one of the host-affine blocks.  We
         # always do strict checking at this stage, so it doesn't matter whether
         # globally we have strict_affinity or not.
-        block_list = self._get_affine_blocks(host,
-                                             ip_version,
-                                             pool)
-        block_ids = list(block_list)
+        _log.info("Looking for %s IPs in already-allocated affine blocks.",
+                  num)
+        host_blocks = self._get_affine_blocks(host, ip_version, pool)
+        num_remaining = num
+        allocated_ips = self._allocate_ips_explicit_blocks(
+            host_blocks,
+            num_remaining,
+            attributes,
+            handle_id,
+            host
+        )
+        num_remaining = num - len(allocated_ips)
+        if len(allocated_ips) < num:
+            # Still addresses to allocate, we've run out of blocks with
+            # affinity.  Before we can assign new blocks or assign in
+            # non-affine blocks, we need to check that our IPAM configuration
+            # allows that.
+            ipam_config = self.get_ipam_config()
+
+            # If we can auto allocate blocks, try to fulfill address request by
+            # allocating new blocks.
+            if ipam_config.auto_allocate_blocks:
+                _log.info("Attempt to allocate %s IPs from new affine blocks",
+                          num_remaining)
+                ips_from_new_blocks = self._allocate_ips_from_new_blocks(
+                    num_remaining,
+                    attributes,
+                    handle_id,
+                    host,
+                    ip_version,
+                    pool,
+                    ipam_config
+                )
+                allocated_ips.extend(ips_from_new_blocks)
+                num_remaining = num - len(allocated_ips)
+
+            if num_remaining > 0:
+                # We've run out of IPs in our blocks and failed to allocate new
+                # blocks.  If we're allowed, try to grab IPs from random
+                # blocks.
+                if not ipam_config.strict_affinity:
+                    _log.info("Still need to allocate %s IPs; strict affinity"
+                              "disabled, trying random blocks.", num_remaining)
+                    ips_from_random_blocks = self._allocate_ips_no_affinity(
+                        num_remaining,
+                        attributes,
+                        handle_id,
+                        host,
+                        ip_version,
+                        pool,
+                        excluded_blocks=set(host_blocks)
+                    )
+                    allocated_ips.extend(ips_from_random_blocks)
+        _log.info("Allocated %s of %s requested IPs", len(allocated_ips), num)
+        return allocated_ips
+
+    def _allocate_ips_explicit_blocks(self, blocks, num, attributes, handle_id,
+                                      host):
+        """Tries to allocate IPs from the explicitly-listed blocks.
+
+        :param list blocks: Blocks to allocate from (for example, the affine
+        blocks for a host).
+        :param num: Number to try to allocate.
+        :param attributes: Contents of this dict will be stored with the
+        assignment and can be queried using get_assignment_attributes().  Must
+        be JSON serializable.
+        :param handle_id: Handle ID to associate with the allocations.
+        :param host: The host ID to use for affinity in assigning IP addresses.
+        :return: list of allocated IPs or an empty list if none were available.
+        """
+        # Copy the list so we can use it as a retry queue.
+        remaining_host_blocks = deque(blocks)
         key_errors = 0
         allocated_ips = []
-
-        num_remaining = num
-        while num_remaining > 0:
+        while len(allocated_ips) < num:
             try:
-                block_id = block_ids.pop(0)
+                block_id = remaining_host_blocks.popleft()
             except IndexError:
-                _log.info("Ran out of affine blocks for %s in pool %s",
-                          host, pool)
+                _log.info("No free IPs in pre-existing affine blocks for "
+                          "host %s", host)
                 break
+            num_remaining = num - len(allocated_ips)
             try:
                 ips = self._auto_assign_ips_in_block(block_id,
                                                      num_remaining,
@@ -687,7 +740,7 @@ class IPAMClient(BlockHandleReaderWriter):
                 key_errors += 1
                 if key_errors <= KEY_ERROR_RETRIES:
                     _log.debug("Queueing block %s for retry.", block_id)
-                    block_ids.append(block_id)
+                    remaining_host_blocks.append(block_id)
                 else:
                     _log.warning("Stopping retry of block %s.", block_id)
                 continue
@@ -700,78 +753,97 @@ class IPAMClient(BlockHandleReaderWriter):
                              block_id)
                 continue
             allocated_ips.extend(ips)
+        return allocated_ips
+
+    def _allocate_ips_from_new_blocks(self, num, attributes, handle_id,
+                                      host, ip_version, pool, ipam_config):
+        """Attempts to allocate new affine block(s) for the given host and
+        then to allocate IPs from them.
+
+        :param num: Number to try to allocate.
+        :param attributes: Contents of this dict will be stored with the
+        assignment and can be queried using get_assignment_attributes().  Must
+        be JSON serializable.
+        :param handle_id: Handle ID to associate with the allocations.
+        :param host: The host ID to use for affinity in assigning IP addresses.
+        :param ip_version: IP version to use when choosing a pool.
+        :param pool: IP pool to choose from, or None for "any pool".
+        :param ipam_config: Pre-loaded IPAM config object.
+        :return: list of allocated IPs or an empty list if none were available.
+        """
+        retries = RETRIES
+        allocated_ips = []
+        while len(allocated_ips) < num and retries > 0:
+            retries -= 1
+            try:
+                new_block = self._new_affine_block(host,
+                                                   ip_version,
+                                                   pool,
+                                                   ipam_config)
+                # If successful, this creates the block and registers it to
+                # us.
+            except NoFreeBlocksError:
+                _log.info("Could not get new host affinity block for %s in "
+                          "pool %s", host, pool)
+                break
             num_remaining = num - len(allocated_ips)
+            ips = self._auto_assign_ips_in_block(new_block,
+                                                 num_remaining,
+                                                 handle_id,
+                                                 attributes,
+                                                 host)
+            allocated_ips.extend(ips)
+        if retries == 0:  # pragma: no cover
+            raise RuntimeError("Hit Max Retries.")
+        return allocated_ips
 
-        # If there are still addresses to allocate, then we've run out of
-        # blocks with affinity.  Before we can assign new blocks or assign in
-        # non-affine blocks, we need to check that our IPAM configuration
-        # allows that.
-        ipam_config = self.get_ipam_config()
+    def _allocate_ips_no_affinity(self, num, attributes, handle_id,
+                                  host, ip_version, pool,
+                                  excluded_blocks):
+        """Tries to allocate IP addresses from any available block, without
+        affinity.
 
-        # If we can auto allocate blocks, try to fulfill address request by
-        # allocating new blocks.
-        if ipam_config.auto_allocate_blocks:
-            _log.debug("Attempt to allocate new affine blocks")
-
-            retries = RETRIES
-            while num_remaining > 0 and retries > 0:
-                retries -= 1
-                try:
-                    new_block = self._new_affine_block(host,
-                                                       ip_version,
-                                                       pool,
-                                                       ipam_config)
-                    # If successful, this creates the block and registers it to
-                    # us.
-                except NoFreeBlocksError:
-                    _log.info("Could not get new host affinity block for %s in "
-                              "pool %s", host, pool)
-                    break
-                ips = self._auto_assign_ips_in_block(new_block,
-                                                     num_remaining,
-                                                     handle_id,
-                                                     attributes,
-                                                     host)
-                allocated_ips.extend(ips)
-                num_remaining = num - len(allocated_ips)
-            if retries == 0:  # pragma: no cover
-                raise RuntimeError("Hit Max Retries.")
-
-        # If there are still addresses to allocate, we've now tried all blocks
-        # with some affinity to us, and tried (and failed) to allocate new
-        # ones.  If we do not require strict host affinity, our last option is
-        # a random hunt through any blocks we haven't yet tried.
-        #
+        :param num: Number to try to allocate.
+        :param attributes: Contents of this dict will be stored with the
+        assignment and can be queried using get_assignment_attributes().  Must
+        be JSON serializable.
+        :param handle_id: Handle ID to associate with the allocations.
+        :param host: The host ID to use for affinity in assigning IP addresses.
+        :param ip_version: IP version to use when choosing a pool.
+        :param pool: IP pool to choose from, or None for "any pool".
+        :param excluded_blocks: set of blocks to exclude from the search, for
+               example, to exclude blocks that we've already looked in.
+        :return: list of allocated IPs or an empty list if none were available.
+        """
         # Note that this processing simply takes all of the IP pools and breaks
-        # them up into block-sized CIDRs, then shuffles and searches through each
-        # CIDR.  This algorithm does not work if we disallow auto-allocation of
-        # blocks because the allocated blocks may be sparsely populated in the
-        # pools resulting in a very slow search for free addresses.
+        # them up into block-sized CIDRs, then searches through each CIDR in a
+        # random order.  This algorithm does not work if we disallow
+        # auto-allocation of blocks because the allocated blocks may be
+        # sparsely populated in the pools resulting in a very slow search for
+        # free addresses.
         #
         # If we need to support non-strict affinity and no auto-allocation of
         # blocks, then we should query the actual allocation blocks and assign
         # from those.
-        if not ipam_config.strict_affinity:
-            _log.debug("Attempt to allocate from non-affine random block")
-            if num_remaining > 0:
-                random_blocks = iter(self._random_blocks(block_list,
-                                                         ip_version,
-                                                         pool))
-            while num_remaining > 0:
-                try:
-                    block_id = random_blocks.next()
-                except StopIteration:
-                    _log.warning("All addresses exhausted in pool %s", pool)
-                    break
-                ips = self._auto_assign_ips_in_block(block_id,
-                                                     num_remaining,
-                                                     handle_id,
-                                                     attributes,
-                                                     host,
-                                                     affinity_check=False)
-                allocated_ips.extend(ips)
-                num_remaining = num - len(allocated_ips)
-
+        _log.debug("Attempt to allocate from non-affine random block")
+        random_blocks = self._random_blocks(version=ip_version, pool=pool,
+                                            excluded_ids=excluded_blocks,
+                                            seed=host)
+        allocated_ips = []
+        while len(allocated_ips) < num:
+            try:
+                block_id = next(random_blocks)
+            except StopIteration:
+                _log.warning("All addresses exhausted in pool %s", pool)
+                break
+            num_remaining = num - len(allocated_ips)
+            ips = self._auto_assign_ips_in_block(block_id,
+                                                 num_remaining,
+                                                 handle_id,
+                                                 attributes,
+                                                 host,
+                                                 affinity_check=False)
+            allocated_ips.extend(ips)
         return allocated_ips
 
     def _auto_assign_ips_in_block(self, block_cidr, num, handle_id, attributes,
@@ -1241,3 +1313,94 @@ class IPAMClient(BlockHandleReaderWriter):
             self.etcd_client.delete(host_path, dir=True, recursive=True)
         except EtcdKeyNotFound:
             pass
+
+
+# Choice of steps to take when iterating over the subnets.  Must all be
+# coprime to powers of 2.  Since we choose a random start point and a random
+# step, repeat collisions are very unlikely.
+STEPS = [1, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59]
+
+
+def _random_subnets_from_cidr(cidr, prefixlen, rnd=random):
+    """
+    Generates the subnets of the given CIDR with the given prefix length
+    in a pseudo-random order with no repeats.
+
+    :param IPNetwork cidr: The large CIDR, from which to pick the
+    prefixlen-length CIDRs.
+    :param int prefixlen: The desired length of output CIDR.
+    :param random.Random rnd: Random number generator to use.  Defaults to the
+    standard library's built-in instance.
+    """
+    if not (0 <= prefixlen <= cidr._module.width):
+        raise ValueError('CIDR prefix /%d invalid for IPv%d!' \
+                         % (prefixlen, cidr.version))
+
+    if not cidr.prefixlen <= prefixlen:
+        # Don't return anything.
+        raise StopIteration
+
+    # Calculate number of subnets to be returned.
+    max_subnets = 2 ** (prefixlen - cidr.prefixlen)
+
+    base_subnet_addr = str(cidr.cidr.ip)  # Throws away the .1 in 10.0.0.1/8.
+    num_returned = 0
+    # Choose our step and initial position randomly.  We avoid using
+    # rnd.shuffle() because that would require us to generate the whole list
+    # of CIDRs, and there could be millions of those!
+    #
+    # Since the steps are chosen to be co-prime to powers of 2 and
+    # max_subnets is a power of 2, we'll cycle through every possible subnet.
+    #
+    # Proof by contradiction: if we don't hit every number, we'd cycle through
+    # a subset of the values, so we'd have:
+    #
+    #   n * step == 0 (MOD max_subnets),  for 0 < n < max_subnets
+    #
+    # So max_subnets would have to divide n * step.
+    # However, step has no power-of-2 factors so max_subnets must divide n.
+    # However, we assumed 0 < n < max_subnets, which is a contradiction.
+    step = rnd.choice(STEPS)
+    position = rnd.randint(0, max_subnets - 1)
+    while num_returned < max_subnets:
+        subnet = IPNetwork('%s/%d' % (base_subnet_addr, prefixlen),
+                           cidr.version)
+        subnet.value += (subnet.size * position)
+        subnet.prefixlen = prefixlen
+        num_returned += 1
+        position = (position + step) % max_subnets
+        yield subnet
+
+
+def _random_subnets_from_cidrs(cidrs, prefixlen, seed=None):
+    """
+    Generates the subnets of the given CIDRs with the given prefix length
+    in a pseudo-random order with no repeats.
+
+    :param cidrs: List of CIDRs.
+    :param prefixlen: Length of subnets to generate.
+    :param seed: Seed for the random number generator; any hashable object or
+    None to use the standard library's seeding strategy.
+    """
+    rnd = random.Random(seed)
+    # Make a generator for the subnet CIDRs in each pool.  We'll pick CIDRs
+    # from each generator in turn so that we spread the subnets evenly between
+    # pools.
+    pool_subnets = deque([_random_subnets_from_cidr(cidr, prefixlen, rnd=rnd)
+                          for cidr in cidrs])
+    num_generated = 0
+    while pool_subnets:
+        # Shuffle the per-pool generators each time we cycle through them.
+        if num_generated % len(pool_subnets) == 0:
+            rnd.shuffle(pool_subnets)
+        # Pop the generator at the head of the queue, if it runs out of
+        # entries, we'll drop it.  Otherwise we'll put it back on the queue.
+        subnet_generator = pool_subnets.popleft()
+        try:
+            subnet = next(subnet_generator)
+        except StopIteration:
+            continue
+        else:
+            yield subnet
+            pool_subnets.append(subnet_generator)
+        num_generated += 1
