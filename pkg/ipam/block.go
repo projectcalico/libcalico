@@ -9,21 +9,22 @@ import (
 )
 
 const (
-	BLOCK_SIZE_BITS = 6
-	BLOCK_SIZE      = 64 // 2**BLOCK_SIZE_BITS
-	CIDR            = "cidr"
-	AFFINITY        = "affinity"
-	HOST_AFFINITY_T = "host:%s"
-	ALLOCATIONS     = "allocations"
-	UNALLOCATED     = "unallocated"
-	STRICT_AFFINITY = "strict_affinity"
-	ATTRIBUTES      = "attributes"
-	ATTR_HANDLE_ID  = "handle_id"
-	ATTR_SECONDARY  = "secondary"
+	BLOCK_PREFIX_LEN_4 = 26
+	BLOCK_SIZE_BITS    = 6
+	BLOCK_SIZE         = 64 // 2**BLOCK_SIZE_BITS
+	CIDR               = "cidr"
+	AFFINITY           = "affinity"
+	HOST_AFFINITY_T    = "host:%s"
+	ALLOCATIONS        = "allocations"
+	UNALLOCATED        = "unallocated"
+	STRICT_AFFINITY    = "strict_affinity"
+	ATTRIBUTES         = "attributes"
+	ATTR_HANDLE_ID     = "handle_id"
+	ATTR_SECONDARY     = "secondary"
 )
 
 type AllocationBlock struct {
-	Cidr           net.IP                `json:"-"`
+	Cidr           net.IPNet             `json:"-"`
 	DbResult       string                `json:"-"`
 	HostAffinity   string                `json:"hostAffinity"`
 	StrictAffinity bool                  `json:"strictAffinity"`
@@ -37,7 +38,7 @@ type AllocationAttribute struct {
 	AttrSecondary map[string]string
 }
 
-func NewBlock(cidr net.IP) AllocationBlock {
+func NewBlock(cidr net.IPNet) AllocationBlock {
 	block := AllocationBlock{}
 	block.Allocations = make([]*int64, BLOCK_SIZE)
 	block.Unallocated = make([]int64, BLOCK_SIZE)
@@ -70,12 +71,12 @@ func IncrementIp(ip net.IP, increment int64) net.IP {
 
 func IpToOrdinal(ip net.IP, block AllocationBlock) int64 {
 	ip_int := IpToInt(ip)
-	base_int := IpToInt(block.Cidr)
+	base_int := IpToInt(block.Cidr.IP)
 	return ip_int - base_int
 }
 
 func OrdinalToIp(ordinal int64, block AllocationBlock) net.IP {
-	return IntToIp(IpToInt(block.Cidr) + ordinal)
+	return IntToIp(IpToInt(block.Cidr.IP) + ordinal)
 }
 
 func (block *AllocationBlock) AutoAssign(num int64, handleId string, host string,
@@ -99,7 +100,7 @@ func (block *AllocationBlock) AutoAssign(num int64, handleId string, host string
 	for _, o := range ordinals {
 		attrIndex := block.FindOrAddAttribute(handleId, attributes)
 		block.Allocations[o] = &attrIndex
-		ips = append(ips, IncrementIp(block.Cidr, o))
+		ips = append(ips, IncrementIp(block.Cidr.IP, o))
 	}
 	return ips, nil
 }
