@@ -1,6 +1,7 @@
 package ipam
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/coreos/etcd/client"
@@ -8,6 +9,7 @@ import (
 	"log"
 	"math"
 	"net"
+	"os"
 	"strings"
 	"time"
 )
@@ -34,7 +36,135 @@ type BlockReaderWriter struct {
 	etcd client.KeysAPI
 }
 
-func (rw BlockReaderWriter) ClaimNewAffineBlock(host string, version int, pool *net.IPNet, config IPAMConfig) (*net.IPNet, error) {
+func (c IPAMClient) AutoAssign(
+	num4 int64, num6 int64, handleId string, attributes map[string]string,
+	host *string, v4pool *net.IPNet, v6pool *net.IPNet) ([]net.IP, []net.IP, error) {
+
+	// Determine the hostname to use - prefer the provided hostname if
+	// non-nil, otherwise use the hostname reported by os.
+	log.Printf("Auto-assign %d ipv4, %d ipv6 addrs", num4, num6)
+	var hostname string
+	var err error
+	if host != nil {
+		hostname = *host
+	} else {
+		hostname, err = os.Hostname()
+		if err != nil {
+			log.Fatal("Failed to acquire hostname")
+		}
+	}
+	log.Printf("Assigning for host: %s", hostname)
+
+	// Assign addresses.
+	v4list, _ := c.autoAssignV4(num4, handleId, attributes, v4pool, hostname)
+	//	v6list := rw.autoAssignV6()
+	v6list := []net.IP{}
+
+	return v4list, v6list, nil
+}
+
+func (c IPAMClient) autoAssignV4(
+	num int64, handleId string, attrs map[string]string, pool *net.IPNet, host string) ([]net.IP, error) {
+
+	// Start by trying to assign from one of the host-affine blocks.  We
+	// always do strict checking at this stage, so it doesn't matter whether
+	// globally we have strict_affinity or not.
+	log.Printf("Looking for addresses in current affine blocks for host %s", host)
+	affBlocks, _ := c.BlockReaderWriter.GetAffineBlocks(host, 4, pool)
+	log.Printf("Found %d affine IPv4 blocks", len(affBlocks))
+	ips := []net.IP{}
+	for int64(len(ips)) < num {
+		if len(affBlocks) == 0 {
+			log.Println("Ran out of affine blocks for host", host)
+			break
+		}
+		cidr := affBlocks[0]
+		affBlocks = affBlocks[1:]
+		ips, _ = c.assignFromExistingBlock(cidr, num, handleId, attrs, host, nil)
+		log.Println("Block provided addresses:", ips)
+	}
+
+	if int64(len(ips)) == num {
+		log.Println("Found enough IP addresses")
+		return ips, nil
+	}
+
+	// If there are still addresses to allocate, then we've run out of
+	// blocks with affinity.  Before we can assign new blocks or assign in
+	// non-affine blocks, we need to check that our IPAM configuration
+	// allows that. TODO - check config, support v6.
+	config := IPAMConfig{StrictAffinity: false}
+	_, p, _ := net.ParseCIDR("192.168.0.0/24")
+	c.BlockReaderWriter.ClaimNewAffineBlock(host, 4, p, config)
+
+	return ips, nil
+}
+
+func (c IPAMClient) assignFromExistingBlock(
+	blockCidr net.IPNet, num int64, handle string, attrs map[string]string, host string, affCheck *bool) ([]net.IP, error) {
+	// Limit number of retries.
+	var ips []net.IP
+	for i := 0; i < RETRIES; i++ {
+		log.Printf("Auto-assign from %s - retry %d", blockCidr, i)
+		b, err := c.BlockReaderWriter.ReadBlock(blockCidr)
+		if err != nil {
+			return nil, err
+		}
+		log.Println("Got block:", b)
+		ips, err = b.AutoAssign(num, handle, host, attrs, true)
+		if err != nil {
+			log.Println("Error in auto assign:", err)
+			return nil, err
+		}
+		if len(ips) == 0 {
+			log.Printf("Block %s is full", blockCidr)
+			return []net.IP{}, nil
+		}
+
+		// TODO: Increment handle?
+
+		// Update the block using CAS.
+		err = c.BlockReaderWriter.CompareAndSwapBlock(*b)
+		if err != nil {
+			// TODO: Decrement handle?
+			log.Println("Error updating block - try again")
+			continue
+		}
+		break
+	}
+	return ips, nil
+}
+
+func (rw BlockReaderWriter) GetAffineBlocks(host string, ipVersion int, pool *net.IPNet) ([]net.IPNet, error) {
+	key := fmt.Sprintf(IPAM_HOST_AFFINITY_PATH, host, ipVersion)
+	opts := client.GetOptions{Quorum: true, Recursive: true}
+	res, err := rw.etcd.Get(context.Background(), key, &opts)
+	if err != nil {
+		log.Println("Error reading blocks from etcd", err)
+		return nil, err
+	}
+	log.Println("Read blocks from etcd:", res)
+
+	ids := []net.IPNet{}
+	if res.Node != nil {
+		for _, n := range res.Node.Nodes {
+			if !n.Dir {
+				// Extract the block identifier (subnet) which is encoded
+				// into the etcd key.  We need to replace "-" with "/" to
+				// turn it back into a cidr.
+				log.Printf("Found block on host %s: %s", host, n.Key)
+				ss := strings.Split(n.Key, "/")
+				_, id, _ := net.ParseCIDR(strings.Replace(ss[len(ss)-1], "-", "/", 1))
+				ids = append(ids, *id)
+			}
+		}
+	}
+	return ids, nil
+}
+
+func (rw BlockReaderWriter) ClaimNewAffineBlock(
+	host string, version int, pool *net.IPNet, config IPAMConfig) (*net.IPNet, error) {
+
 	// TODO: Validate the given pool to ensure it exists, default to all pools.
 	pools := []net.IPNet{*pool}
 
@@ -43,8 +173,8 @@ func (rw BlockReaderWriter) ClaimNewAffineBlock(host string, version int, pool *
 	for _, pool := range pools {
 		for _, subnet := range Subnets(pool, BLOCK_PREFIX_LEN_4) {
 			// Check if a block already exists for this subnet.
-			etcdPath := blockDatastorePath(subnet)
-			_, err := rw.etcd.Get(context.Background(), etcdPath, nil)
+			key := blockDatastorePath(subnet)
+			_, err := rw.etcd.Get(context.Background(), key, nil)
 			if client.IsKeyNotFound(err) {
 				// The block does not yet exist in etcd.  Try to grab it.
 				log.Println("Found free block:", subnet)
@@ -71,66 +201,66 @@ func (rw BlockReaderWriter) claimBlockAffinity(subnet net.IPNet, host string, co
 	block.StrictAffinity = config.StrictAffinity
 
 	// Compare and swap the new block.
-	err := rw.compareAndSwapBlock(block)
+	err := rw.CompareAndSwapBlock(block)
 	if err != nil {
 		log.Println("Error claiming block affinity:", err)
 	}
 }
 
-func (rw BlockReaderWriter) compareAndSwapBlock(block AllocationBlock) error {
+func (rw BlockReaderWriter) CompareAndSwapBlock(b AllocationBlock) error {
 	// If the block has a store result, compare and swap agianst that.
-	if block.DbResult != "" {
-		log.Println("CAS update block:", block)
+	var opts client.SetOptions
+	key := blockDatastorePath(b.Cidr)
+
+	// Determine correct Set options.
+	if b.DbResult != "" {
+		log.Println("CAS update block:", b.Cidr)
+		opts = client.SetOptions{PrevExist: client.PrevExist, PrevValue: b.DbResult}
 	} else {
-		log.Println("CAS write new block:", block)
-		etcdPath := blockDatastorePath(block.Cidr)
-		opts := client.SetOptions{PrevExist: client.PrevNoExist}
-		rw.etcd.Set(context.Background(), etcdPath, "", &opts)
+		log.Println("CAS write new block:", b.Cidr)
+		opts = client.SetOptions{PrevExist: client.PrevNoExist}
 	}
 
-	//        # If the block has a db_result, CAS against that.
-	//        if block.db_result is not None:
-	//            _log.debug("CAS Update block %s", block)
-	//            try:
-	//                self.etcd_client.update(block.update_result())
-	//            except EtcdCompareFailed:
-	//                raise CASError(str(block.cidr))
-	//        else:
-	//            _log.debug("CAS Write new block %s", block)
-	//            key = _block_datastore_key(block.cidr)
-	//            value = block.to_json()
-	//            try:
-	//                self.etcd_client.write(key, value, prevExist=False)
-	//            except EtcdAlreadyExist:
-	//                raise CASError(str(block.cidr))
-	//
+	j, err := json.Marshal(b)
+	if err != nil {
+		log.Println("Error converting block to json:", err)
+		return err
+	}
+	_, err = rw.etcd.Set(context.Background(), key, string(j), &opts)
+	if err != nil {
+		log.Println("CAS error writing block:", err)
+		return err
+	}
+
 	return nil
 }
 
 func Subnets(network net.IPNet, prefixLength int) []net.IPNet {
-	subnets := []net.IPNet{}
+	nets := []net.IPNet{}
 	ip := network.IP
 	size := int64(math.Exp2(float64(32 - prefixLength)))
 	mask := net.CIDRMask(prefixLength, 32) // TODO: Support IPv6
 	for network.Contains(ip) {
-		subnets = append(subnets, net.IPNet{ip, mask})
-		ip = IncrementIp(ip, size)
+		nets = append(nets, net.IPNet{ip, mask})
+		ip = IncrementIP(ip, size)
 	}
-	log.Printf("%s has %d subnets of size %d", network, len(subnets), size)
-	return subnets
+	log.Printf("%s has %d subnets of size %d", network, len(nets), size)
+	return nets
 }
 
 func (rw BlockReaderWriter) ReadBlock(blockCidr net.IPNet) (*AllocationBlock, error) {
-	// TODO: Set Get options properly (quorum, etc)
-	etcdPath := blockDatastorePath(blockCidr)
-	resp, err := rw.etcd.Get(context.Background(), etcdPath, nil)
+	key := blockDatastorePath(blockCidr)
+	opts := client.GetOptions{Quorum: true}
+	resp, err := rw.etcd.Get(context.Background(), key, &opts)
 	if err != nil {
 		log.Println("Error reading IPAM block:", err)
 		return nil, err
 	}
-	log.Println("Response:", resp)
-	block := NewBlock(blockCidr)
-	return &block, nil
+	log.Println("Response from etcd:", resp)
+	b := NewBlock(blockCidr)
+	json.Unmarshal([]byte(resp.Node.Value), &b)
+	b.DbResult = resp.Node.Value
+	return &b, nil
 }
 
 func blockDatastorePath(blockCidr net.IPNet) string {
@@ -146,7 +276,7 @@ func blockHostAffinityPath(blockCidr net.IPNet, host string) string {
 }
 
 type IPAMClient struct {
-	BlockWriter BlockReaderWriter
+	BlockReaderWriter BlockReaderWriter
 }
 
 func NewIPAMClient() (*IPAMClient, error) {
@@ -163,7 +293,7 @@ func NewIPAMClient() (*IPAMClient, error) {
 		return nil, err
 	}
 	api := client.NewKeysAPI(c)
-	blockWriter := BlockReaderWriter{etcd: api}
+	b := BlockReaderWriter{etcd: api}
 
-	return &IPAMClient{BlockWriter: blockWriter}, nil
+	return &IPAMClient{BlockReaderWriter: b}, nil
 }
