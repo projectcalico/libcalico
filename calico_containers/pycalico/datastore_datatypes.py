@@ -42,7 +42,7 @@ class Rules(namedtuple("Rules", ["id", "inbound_rules", "outbound_rules"])):
     """
     def to_dict(self):
         """
-        Convert the Rules object to a dictionary. 
+        Convert the Rules object to a dictionary.
 
         :return:  A dictionary representation of this object.
         """
@@ -397,7 +397,7 @@ class Policy(object):
     def __init__(self, tier_name, policy_name):
         self.tier_name = tier_name
         self.policy_name = policy_name
-        self.order = 0 
+        self.order = 0
 
         # Default to empty lists of rules.
         self.rules = Rules(policy_name, [], [])
@@ -446,7 +446,7 @@ class Rule(dict):
         # Convert any CIDR strings to netaddr before inserting them.
         if key in ("src_net", "dst_net"):
             value = IPNetwork(value)
-        if key == "action" and value not in ("allow", "deny"):
+        if key == "action" and value not in ("allow", "deny", "next-tier"):
             raise ValueError("'%s' is not allowed for key 'action'" % value)
         if (key == "protocol" and
             value not in ("tcp", "udp", "icmp", "icmpv6", None)):
