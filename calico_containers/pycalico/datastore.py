@@ -89,6 +89,7 @@ IP_IN_IP_PATH = CONFIG_PATH + "IpInIpEnabled"
 LOG_SEVERITY_FILE_PATH = CONFIG_PATH + "LogSeverityFile"
 LOG_SEVERITY_SCREEN_PATH = CONFIG_PATH + "LogSeverityScreen"
 LOG_FILE_PATH_PATH = CONFIG_PATH + "LogFilePath"
+FELIX_REPORTING_INTERVAL_PATH = CONFIG_PATH + "ReportingIntervalSecs"
 
 # The default node AS number.
 DEFAULT_AS_NUM = 64511
@@ -284,8 +285,11 @@ class DatastoreClient(object):
         self._write_global_config(LOG_FILE_PATH_PATH,
                                   DEFAULT_LOG_FILE_PATH)
 
-        # IP in IP is enabled globally.
+        # IP in IP is disabled globally.
         self._write_global_config(IP_IN_IP_PATH, IP_IN_IP_DISABLED)
+
+        # Disable felix status reporting, which consumes etcd write bandwidth.
+        self._write_global_config(FELIX_REPORTING_INTERVAL_PATH, "0")
 
         # We are always ready.
         self.etcd_client.write(CALICO_V_PATH + "/Ready", "true")

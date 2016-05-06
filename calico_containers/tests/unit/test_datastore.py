@@ -543,6 +543,7 @@ class TestDatastoreClient(unittest.TestCase):
         log_screen_path = CONFIG_PATH + "LogSeverityScreen"
         log_file_path_path = CONFIG_PATH + "LogFilePath"
         ipip_path = CONFIG_PATH + "IpInIpEnabled"
+        reporting_int_path = CONFIG_PATH + "ReportingIntervalSecs"
         self.etcd_client.read.side_effect = EtcdKeyNotFound
 
         # We only write the interface prefix if there is no entry in the
@@ -557,7 +558,8 @@ class TestDatastoreClient(unittest.TestCase):
                           call(log_file_path),
                           call(log_screen_path),
                           call(log_file_path_path),
-                          call(ipip_path)]
+                          call(ipip_path),
+                          call(reporting_int_path)]
         self.etcd_client.read.assert_has_calls(expected_reads)
 
         expected_writes = [call(int_prefix_path, "cali"),
@@ -571,6 +573,7 @@ class TestDatastoreClient(unittest.TestCase):
                            call(log_screen_path, "info"),
                            call(log_file_path_path, "none"),
                            call(ipip_path, "false"),
+                           call(reporting_int_path, "0"),
                            call(CALICO_V_PATH + "/Ready", "true")]
         self.etcd_client.write.assert_has_calls(expected_writes)
 
@@ -593,6 +596,7 @@ class TestDatastoreClient(unittest.TestCase):
         log_screen_path = CONFIG_PATH + "LogSeverityScreen"
         log_file_path_path = CONFIG_PATH + "LogFilePath"
         ipip_path = CONFIG_PATH + "IpInIpEnabled"
+        reporting_int_path = CONFIG_PATH + "ReportingIntervalSecs"
         self.etcd_client.read.side_effect = EtcdKeyNotFound
 
         self.datastore.ensure_global_config()
@@ -608,6 +612,7 @@ class TestDatastoreClient(unittest.TestCase):
                            call(log_screen_path, "info"),
                            call(log_file_path_path, "none"),
                            call(ipip_path, "false"),
+                           call(reporting_int_path, "0"),
                            call(CALICO_V_PATH + "/Ready", "true")]
         self.etcd_client.write.assert_has_calls(expected_writes)
 
