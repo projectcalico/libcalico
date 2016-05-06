@@ -104,6 +104,13 @@ def get_hostname():
         return socket.gethostname()
 
 
+def validate_port_str(port_str):
+    """
+    Checks whether the command line word specifying a set of ports is valid.
+    """
+    return validate_ports(port_str.split(","))
+
+
 def validate_ports(port_list):
     """
     Checks whether a list of ports are within range of 0 and 65535.

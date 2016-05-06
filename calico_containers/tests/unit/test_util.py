@@ -17,7 +17,7 @@ from mock import patch
 from netaddr import IPAddress
 from subprocess import CalledProcessError, check_output
 from pycalico.util import get_host_ips, validate_characters, validate_ports, validate_icmp_type, validate_hostname_port, \
-    validate_cidr_versions, validate_ip, validate_cidr
+    validate_cidr_versions, validate_ip, validate_cidr, validate_port_str
 from nose_parameterized import parameterized
 
 MOCK_IP_ADDR = \
@@ -200,6 +200,25 @@ class TestUtil(unittest.TestCase):
         Test validate_ports function
         """
         test_result = validate_ports(input_list)
+        self.assertEqual(expected_result, test_result)
+
+    # Each input parameter for this test is the command line word following 'to
+    # ports' or 'from ports'.
+    @parameterized.expand([
+        ('2,5,114', True),
+        ('89:133,19', True),
+        ('15,66,-144', False),
+        ('-1:5', False),
+        ('15:77:66', False),
+        ('39040:39080', True),
+        ('39080:39040', False),
+        ('one,two', False)
+    ])
+    def test_validate_port_str(self, input_word, expected_result):
+        """
+        Test validate_port_str function
+        """
+        test_result = validate_port_str(input_word)
         self.assertEqual(expected_result, test_result)
 
     @parameterized.expand([
