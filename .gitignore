@@ -9,4 +9,5 @@ env
 cover
 calicobuild.created
 caliconode.created
+calico_test.created
 calico_containers/pycalico.egg-info/
