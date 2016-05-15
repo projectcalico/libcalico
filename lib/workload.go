@@ -1,4 +1,4 @@
-package workload
+package libcalico
 
 import (
 	"github.com/coreos/etcd/client"

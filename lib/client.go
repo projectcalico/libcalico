@@ -1,4 +1,4 @@
-package pkg
+package libcalico
 
 import (
 	"github.com/coreos/etcd/client"

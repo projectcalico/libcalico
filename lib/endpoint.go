@@ -1,4 +1,4 @@
-package endpoint
+package libcalico
 
 import (
 	"encoding/json"
@@ -7,7 +7,6 @@ import (
 	"github.com/coreos/etcd/client"
 	"fmt"
 	"github.com/satori/go.uuid"
-	"github.com/projectcalico/libcalico/pkg/workload"
 	"golang.org/x/net/context"
 )
 
@@ -140,7 +139,7 @@ func (e *Endpoint) Write(etcd client.KeysAPI) error {
 	return nil
 }
 
-func GetEndpoint(etcd client.KeysAPI, w workload.Workload) (bool, Endpoint, error) {
+func GetEndpoint(etcd client.KeysAPI, w Workload) (bool, Endpoint, error) {
 	key := fmt.Sprintf("/calico/v1/host/%s/workload/%s/%s/endpoint/", w.Hostname, w.OrchestratorID, w.WorkloadID)
 	resp, err := etcd.Get(context.Background(), key, &client.GetOptions{Recursive:true})
 	if err != nil {

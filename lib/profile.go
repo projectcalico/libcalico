@@ -1,4 +1,4 @@
-package profile
+package libcalico
 
 import (
 	"encoding/json"
