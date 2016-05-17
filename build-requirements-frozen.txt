@@ -6,6 +6,7 @@ netaddr==0.7.18
 prettytable==0.7.2
 PyInstaller==3.1.1
 python-etcd==0.4.3
+prometheus_client==0.0.13
 PyYAML==3.11
 requests==2.9.1
 six==1.10.0
