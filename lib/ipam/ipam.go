@@ -29,7 +29,8 @@ const (
 )
 
 type IPAMConfig struct {
-	StrictAffinity bool
+	StrictAffinity     bool
+	AutoAllocateBlocks bool
 }
 
 type BlockReaderWriter struct {
@@ -37,26 +38,17 @@ type BlockReaderWriter struct {
 }
 
 func (c IPAMClient) AutoAssign(
-	num4 int64, num6 int64, handleId string, attributes map[string]string,
+	num4 int64, num6 int64, handle string, attributes map[string]string,
 	host *string, v4pool *net.IPNet, v6pool *net.IPNet) ([]net.IP, []net.IP, error) {
 
 	// Determine the hostname to use - prefer the provided hostname if
 	// non-nil, otherwise use the hostname reported by os.
 	log.Printf("Auto-assign %d ipv4, %d ipv6 addrs", num4, num6)
-	var hostname string
-	var err error
-	if host != nil {
-		hostname = *host
-	} else {
-		hostname, err = os.Hostname()
-		if err != nil {
-			log.Fatal("Failed to acquire hostname")
-		}
-	}
+	hostname := decideHostname(host)
 	log.Printf("Assigning for host: %s", hostname)
 
 	// Assign addresses.
-	v4list, _ := c.autoAssignV4(num4, handleId, attributes, v4pool, hostname)
+	v4list, _ := c.autoAssignV4(num4, handle, attributes, v4pool, hostname)
 	//	v6list := rw.autoAssignV6()
 	v6list := []net.IP{}
 
@@ -64,13 +56,13 @@ func (c IPAMClient) AutoAssign(
 }
 
 func (c IPAMClient) autoAssignV4(
-	num int64, handleId string, attrs map[string]string, pool *net.IPNet, host string) ([]net.IP, error) {
+	num int64, handle string, attrs map[string]string, pool *net.IPNet, host string) ([]net.IP, error) {
 
 	// Start by trying to assign from one of the host-affine blocks.  We
 	// always do strict checking at this stage, so it doesn't matter whether
 	// globally we have strict_affinity or not.
 	log.Printf("Looking for addresses in current affine blocks for host %s", host)
-	affBlocks, _ := c.BlockReaderWriter.GetAffineBlocks(host, 4, pool)
+	affBlocks, _ := c.BlockReaderWriter.getAffineBlocks(host, 4, pool)
 	log.Printf("Found %d affine IPv4 blocks", len(affBlocks))
 	ips := []net.IP{}
 	for int64(len(ips)) < num {
@@ -80,24 +72,74 @@ func (c IPAMClient) autoAssignV4(
 		}
 		cidr := affBlocks[0]
 		affBlocks = affBlocks[1:]
-		ips, _ = c.assignFromExistingBlock(cidr, num, handleId, attrs, host, nil)
+		ips, _ = c.assignFromExistingBlock(cidr, num, handle, attrs, host, nil)
 		log.Println("Block provided addresses:", ips)
-	}
-
-	if int64(len(ips)) == num {
-		log.Println("Found enough IP addresses")
-		return ips, nil
 	}
 
 	// If there are still addresses to allocate, then we've run out of
 	// blocks with affinity.  Before we can assign new blocks or assign in
 	// non-affine blocks, we need to check that our IPAM configuration
-	// allows that. TODO - check config, support v6.
-	config := IPAMConfig{StrictAffinity: false}
-	_, p, _ := net.ParseCIDR("192.168.0.0/24")
-	c.BlockReaderWriter.ClaimNewAffineBlock(host, 4, p, config)
+	// allows that.
+	// TODO: Read config from etcd
+	// TODO: support v6.
+	config := IPAMConfig{StrictAffinity: false, AutoAllocateBlocks: true}
+	if config.AutoAllocateBlocks == true {
+		rem := num - int64(len(ips))
+		log.Printf("Need to allocate %d more addresses", rem)
+		// TODO: Don't use hard-coded pool.
+		_, p, _ := net.ParseCIDR("192.168.0.0/16")
+		// TODO: Limit number of retries.
+		retries := RETRIES
+		for rem > 0 {
+			// Claim a new block.
+			b, err := c.BlockReaderWriter.ClaimNewAffineBlock(host, 4, p, config)
+			if err != nil {
+				log.Println("Error claiming new block:", err)
+				retries = retries - 1
+				if retries == 0 {
+					log.Println("Max retries hit")
+					return nil, errors.New("Max retries hit")
+				}
+			} else {
+				// Claim successful.  Assign addresses from the new block.
+				log.Println("Claimed new block - assigning addresses")
+				newIPs, err := c.assignFromExistingBlock(*b, rem, handle, attrs, host, &config.StrictAffinity)
+				if err != nil {
+					log.Println("Error assigning IPs:", err)
+					break
+				}
+				ips = append(ips, newIPs...)
+				rem = num - int64(len(ips))
+			}
+		}
+	}
+
+	// If there are still addresses to allocate, we've now tried all blocks
+	// with some affinity to us, and tried (and failed) to allocate new
+	// ones.  If we do not require strict host affinity, our last option is
+	// a random hunt through any blocks we haven't yet tried.
+	//
+	// Note that this processing simply takes all of the IP pools and breaks
+	// them up into block-sized CIDRs, then shuffles and searches through each
+	// CIDR.  This algorithm does not work if we disallow auto-allocation of
+	// blocks because the allocated blocks may be sparsely populated in the
+	// pools resulting in a very slow search for free addresses.
+	//
+	// If we need to support non-strict affinity and no auto-allocation of
+	// blocks, then we should query the actual allocation blocks and assign
+	// from those.
+	if config.StrictAffinity != true {
+		log.Println("Attempting to assign from non-affine block")
+		// TODO: this
+	}
 
 	return ips, nil
+}
+
+func (c IPAMClient) AssignIP(addr net.IP, handle string, attrs map[string]string, host *string) {
+	hostname := decideHostname(host)
+	log.Printf("Assigning for host: %s", hostname)
+	//blockCidr := GetBlockCIDRForAddress(addr)
 }
 
 func (c IPAMClient) assignFromExistingBlock(
@@ -135,7 +177,7 @@ func (c IPAMClient) assignFromExistingBlock(
 	return ips, nil
 }
 
-func (rw BlockReaderWriter) GetAffineBlocks(host string, ipVersion int, pool *net.IPNet) ([]net.IPNet, error) {
+func (rw BlockReaderWriter) getAffineBlocks(host string, ipVersion int, pool *net.IPNet) ([]net.IPNet, error) {
 	key := fmt.Sprintf(IPAM_HOST_AFFINITY_PATH, host, ipVersion)
 	opts := client.GetOptions{Quorum: true, Recursive: true}
 	res, err := rw.etcd.Get(context.Background(), key, &opts)
@@ -189,7 +231,7 @@ func (rw BlockReaderWriter) ClaimNewAffineBlock(
 	return nil, errors.New("No free blocks")
 }
 
-func (rw BlockReaderWriter) claimBlockAffinity(subnet net.IPNet, host string, config IPAMConfig) {
+func (rw BlockReaderWriter) claimBlockAffinity(subnet net.IPNet, host string, config IPAMConfig) error {
 	// Claim the block in etcd.
 	log.Printf("Host %s claiming block affinity for %s", host, subnet)
 	affinityPath := blockHostAffinityPath(subnet, host)
@@ -203,8 +245,26 @@ func (rw BlockReaderWriter) claimBlockAffinity(subnet net.IPNet, host string, co
 	// Compare and swap the new block.
 	err := rw.CompareAndSwapBlock(block)
 	if err != nil {
+		// Block already exists, check affinity.
+		// TODO: Check type of returned error.
 		log.Println("Error claiming block affinity:", err)
+		b, err := rw.ReadBlock(subnet)
+		if err != nil {
+			log.Println("Error reading block:", err)
+			return err
+		}
+		if b.HostAffinity == host {
+			// Block has affinity to this host, meaning another
+			// process on this host claimed it.
+			log.Printf("Block %s already claimed by us.  Success", subnet)
+			return nil
+		}
+
+		// Some other host beat us to this block.  Cleanup and return error.
+		rw.etcd.Delete(context.Background(), affinityPath, &client.DeleteOptions{})
+		return errors.New(fmt.Sprintf("Block %s already claimed by %s", subnet, b.HostAffinity))
 	}
+	return nil
 }
 
 func (rw BlockReaderWriter) CompareAndSwapBlock(b AllocationBlock) error {
@@ -277,6 +337,22 @@ func blockHostAffinityPath(blockCidr net.IPNet, host string) string {
 
 type IPAMClient struct {
 	BlockReaderWriter BlockReaderWriter
+}
+
+func decideHostname(host *string) string {
+	// Determine the hostname to use - prefer the provided hostname if
+	// non-nil, otherwise use the hostname reported by os.
+	var hostname string
+	var err error
+	if host != nil {
+		hostname = *host
+	} else {
+		hostname, err = os.Hostname()
+		if err != nil {
+			log.Fatal("Failed to acquire hostname")
+		}
+	}
+	return hostname
 }
 
 func NewIPAMClient() (*IPAMClient, error) {

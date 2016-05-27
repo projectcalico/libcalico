@@ -267,6 +267,13 @@ func (b *AllocationBlock) FindOrAddAttribute(handleId string, attrs map[string]s
 	return int64(attrIndex)
 }
 
+func GetBlockCIDRForAddress(addr net.IP) net.IPNet {
+	// TODO: Support v6
+	mask := net.CIDRMask(26, 32)
+	masked := addr.Mask(mask)
+	return net.IPNet{IP: masked, Mask: mask}
+}
+
 func IntInSlice(searchInt int64, slice []int64) bool {
 	for _, v := range slice {
 		if v == searchInt {
