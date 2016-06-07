@@ -25,3 +25,8 @@ dependencies:
 test:
   override:
     - make ut-circle
+experimental:
+  notify:
+    branches:
+      only:
+        - master
