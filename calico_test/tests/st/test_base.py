@@ -48,7 +48,7 @@ class TestBase(TestCase):
         logger.info("")
 
     @debug_failures
-    def assert_connectivity(self, pass_list, fail_list=None):
+    def assert_connectivity(self, pass_list, fail_list=None, retries=0):
         """
         Assert partial connectivity graphs between workloads.
 
@@ -57,14 +57,15 @@ class TestBase(TestCase):
         :param fail_list: Every workload in pass_list should *not* be able to
         ping each workload in this list. Interconnectivity is not checked
         *within* the fail_list.
+        :param retries: The number of retries.
         """
         if fail_list is None:
             fail_list = []
         for source in pass_list:
             for dest in pass_list:
-                source.assert_can_ping(dest.ip)
+                source.assert_can_ping(dest.ip, retries)
             for dest in fail_list:
-                source.assert_cant_ping(dest.ip)
+                source.assert_cant_ping(dest.ip, retries)
 
     @debug_failures
     def assert_ip_connectivity(self, workload_list, ip_pass_list,
