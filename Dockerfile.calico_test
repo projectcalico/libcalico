@@ -35,7 +35,8 @@
 # - run 'nosetests'
 FROM docker
 MAINTAINER Tom Denham <tom@projectcalico.org>
-# Running STs in this containers require that it has all dependencies isntalled
+
+# Running STs in this containers require that it has all dependencies installed
 # for executing calicoctl. Install these dependencies (including glibc: 
 # https://github.com/jeanblanchard/docker-alpine-glibc/blob/master/Dockerfile)
 # We install glibc onto the official docker image (instead of adding docker to 
@@ -50,7 +51,6 @@ RUN apk add --update python python-dev py-pip py-setuptools \
         apk add --allow-untrusted glibc-bin.apk && \
         /usr/glibc-compat/sbin/ldconfig /lib /usr/glibc/usr/lib && \
         echo 'hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4' >> /etc/nsswitch.conf && \
-        apk del curl && \
         rm -f glibc.apk glibc-bin.apk && \
         rm -rf /var/cache/apk/*
 
