@@ -3,7 +3,8 @@ dist
 venv
 env
 .idea
-*.pyc
+**/*.pyc
+**/*.sw[pon]
 *~
 .coverage
 cover
