@@ -7,6 +7,31 @@ import (
 	"golang.org/x/net/context"
 )
 
+type ProfileKey struct {
+	ProfileID string
+}
+
+type ProfileRulesKey ProfileKey
+
+func (key ProfileRulesKey) asEtcdKey() string {
+	return fmt.Sprintf("/calico/v1/policy/profile/%s/rules",
+		key.ProfileID)
+}
+
+type ProfileTagsKey ProfileKey
+
+func (key ProfileTagsKey) asEtcdKey() string {
+	return fmt.Sprintf("/calico/v1/policy/profile/%s/tags",
+		key.ProfileID)
+}
+
+type ProfileLabelsKey ProfileKey
+
+func (key ProfileLabelsKey) asEtcdKey() string {
+	return fmt.Sprintf("/calico/v1/policy/profile/%s/labels",
+		key.ProfileID)
+}
+
 type Rules struct {
 	Inbound  []Rule `json:"inbound_rules"`
 	Outbound []Rule `json:"outbound_rules"`
@@ -18,7 +43,7 @@ type Rule struct {
 }
 
 type Profile struct {
-	ID    string `json:"-"`
+	ProfileKey `json:"-"`
 	Tags  []string `json:"tags"`
 	Rules Rules `json:"rules"`
 }
@@ -36,8 +61,8 @@ func ProfileExists(id string, etcd client.KeysAPI) (bool, error) {
 }
 
 func (p *Profile) Write(etcd client.KeysAPI) error {
-	tagsKey := fmt.Sprintf("/calico/v1/policy/profile/%s/tags", p.ID)
-	rulesKey := fmt.Sprintf("/calico/v1/policy/profile/%s/rules", p.ID)
+	tagsKey := fmt.Sprintf("/calico/v1/policy/profile/%s/tags", p.ProfileID)
+	rulesKey := fmt.Sprintf("/calico/v1/policy/profile/%s/rules", p.ProfileID)
 	tagBytes, _ := json.Marshal(p.Tags)
 	ruleBytes, _ := json.Marshal(p.Rules)
 

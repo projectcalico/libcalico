@@ -2,28 +2,56 @@ package libcalico
 
 import (
 	"encoding/json"
-	"log"
-	"regexp"
-	"github.com/coreos/etcd/client"
 	"fmt"
+	"github.com/coreos/etcd/client"
 	"github.com/satori/go.uuid"
 	"golang.org/x/net/context"
+	"log"
+	"regexp"
 )
 
 var re = regexp.MustCompile(`/calico/v1/host/[^/]*?/workload/[^/]*/([^/]*)/endpoint/[^/]*`)
 
-type Endpoint struct {
-	Hostname       string            `json:"-"`
+type EndpointKey struct {
+	Hostname       string `json:"-"`
 	OrchestratorID string `json:"-"`
 	WorkloadID     string `json:"-"`
 	EndpointID     string `json:"-"`
-	State          string `json:"state"`
-	Name           string `json:"name"`
-	Mac            string `json:"mac"`
-	ProfileID      []string `json:"profile_ids"`
-	IPv4Nets       []string `json:"ipv4_nets"`
-	IPv6Nets       []string `json:"ipv6_nets"`
-	Labels         map[string]string `json:"labels,omitempty"`
+}
+
+func (key EndpointKey) asEtcdKey() string {
+	return fmt.Sprintf("/calico/v1/host/%s/workload/%s/%s/endpoint/%s",
+		key.Hostname, key.OrchestratorID, key.WorkloadID, key.EndpointID)
+}
+
+type Endpoint struct {
+	EndpointKey `json:"-"`
+	State       string            `json:"state"`
+	Name        string            `json:"name"`
+	Mac         string            `json:"mac"`
+	ProfileID   []string          `json:"profile_ids"`
+	IPv4Nets    []string          `json:"ipv4_nets"`
+	IPv6Nets    []string          `json:"ipv6_nets"`
+	Labels      map[string]string `json:"labels,omitempty"`
+}
+
+type HostEndpointKey struct {
+	Hostname       string `json:"-"`
+	EndpointID     string `json:"-"`
+}
+
+func (key HostEndpointKey) asEtcdKey() string {
+	return fmt.Sprintf("/calico/v1/host/%s/endpoint/%s",
+		key.Hostname, key.EndpointID)
+}
+
+type HostEndpoint struct {
+	HostEndpointKey `json:"-"`
+	Name        string            `json:"name,omitempty"`
+	ProfileIDs   []string          `json:"profile_ids"`
+	ExpectedIPv4Addrs    []string          `json:"expected_ipv4_addrs"`
+	ExpectedIPv6Addrs    []string          `json:"expected_ipv4_addrs"`
+	Labels      map[string]string `json:"labels,omitempty"`
 }
 
 type LabelOnlyEndpoint struct {
@@ -59,6 +87,24 @@ func GetEndpoints(endpoints_chan chan EndpointSync, etcd client.KeysAPI) error {
 
 	endpoints_chan <- EndpointSync{endpoints, resp.Index}
 	return nil
+}
+
+func ParseEndpoint(key *EndpointKey, rawData []byte) (endpoint *Endpoint, err error) {
+	endpoint = &Endpoint{EndpointKey: *key}
+	err = json.Unmarshal([]byte(rawData), endpoint)
+	if err != nil {
+		endpoint = nil
+	}
+	return
+}
+
+func ParseHostEndpoint(key *HostEndpointKey, rawData []byte) (hostEndpoint *HostEndpoint, err error) {
+	hostEndpoint = &HostEndpoint{HostEndpointKey: *key}
+	err = json.Unmarshal([]byte(rawData), hostEndpoint)
+	if err != nil {
+		hostEndpoint = nil
+	}
+	return
 }
 
 func WatchEndpoints(ch chan EndpointUpdate, AfterIndex uint64, etcd client.KeysAPI) error {
@@ -126,7 +172,8 @@ func (e *Endpoint) Write(etcd client.KeysAPI) error {
 		u1 := uuid.NewV1()
 		e.EndpointID = fmt.Sprintf("%x", u1)
 	}
-	key := fmt.Sprintf("/calico/v1/host/%s/workload/%s/%s/endpoint/%s", e.Hostname, e.OrchestratorID, e.WorkloadID, e.EndpointID)
+	key := fmt.Sprintf("/calico/v1/host/%s/workload/%s/%s/endpoint/%s",
+		e.Hostname, e.OrchestratorID, e.WorkloadID, e.EndpointID)
 	bytes, err := json.Marshal(e)
 	if err != nil {
 		return err
@@ -139,44 +186,30 @@ func (e *Endpoint) Write(etcd client.KeysAPI) error {
 	return nil
 }
 
-func GetEndpoint(etcd client.KeysAPI, w Workload) (bool, Endpoint, error) {
+func GetEndpoint(etcd client.KeysAPI, w Workload) (bool, *Endpoint, error) {
 	key := fmt.Sprintf("/calico/v1/host/%s/workload/%s/%s/endpoint/", w.Hostname, w.OrchestratorID, w.WorkloadID)
-	resp, err := etcd.Get(context.Background(), key, &client.GetOptions{Recursive:true})
+	resp, err := etcd.Get(context.Background(), key, &client.GetOptions{Recursive: true})
 	if err != nil {
 		if client.IsKeyNotFound(err) {
-			return false, Endpoint{}, nil
+			return false, &Endpoint{}, nil
 		} else {
-			return false, Endpoint{}, err
+			return false, &Endpoint{}, err
 		}
 
 	} else {
 		for _, node := range resp.Node.Nodes {
 			if !node.Dir {
-				var re = regexp.MustCompile(`/calico/v1/host/([^/]*?)/workload/([^/]*?)/([^/]*?)/endpoint/([^/]+)`)
-				matches := re.FindStringSubmatch(node.Key)
-				if matches != nil {
-					hostname := matches[1]
-					orchestratorID := matches[2]
-					workloadID := matches[3]
-					endpointID := matches[4]
-
-					endpoint := Endpoint{
-						Hostname:hostname,
-						OrchestratorID:orchestratorID,
-						WorkloadID:workloadID,
-						EndpointID:endpointID}
-
-					err := json.Unmarshal([]byte(node.Value), &endpoint)
-					if err != nil {
-						return false, Endpoint{}, err
-					}
-					return true, endpoint, nil
+				key := ParseKey(node.Key).(EndpointKey)
+				endpoint, err := ParseEndpoint(&key, []byte(node.Value))
+				if err != nil {
+					return false, nil, err
 				}
+				return true, endpoint, nil
 			}
 		}
 	}
 
-	return false, Endpoint{}, nil
+	return false, &Endpoint{}, nil
 }
 
 func processNode(n *client.Node, endpoints map[string]LabelOnlyEndpoint) {
