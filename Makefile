@@ -20,7 +20,7 @@ update-frozen:
 	docker build -t calico/build .
 	docker run --rm calico/build pip freeze | grep -v pycalico > build-requirements-frozen.txt
 
-calicobuild.created: $(BUILD_FILES)
+calicobuild.created: $(BUILD_FILES) $(PYCALICO)
 	docker build -t calico/build .
 	touch calicobuild.created
 
