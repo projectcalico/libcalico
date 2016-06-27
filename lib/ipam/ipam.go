@@ -16,17 +16,19 @@ import (
 // TODO: Write GoDoc for at least public functions.
 
 const (
-	RETRIES           = 100
-	KEY_ERROR_RETRIES = 3
+	// Number of retries when we have an error writing data
+	// to etcd.
+	etcdRetries   = 100
+	keyErrRetries = 3
 
 	// IPAM paths
-	IPAM_V_PATH             = "/calico/ipam/v2/"
-	IPAM_CONFIG_PATH        = IPAM_V_PATH + "config"
-	IPAM_HOSTS_PATH         = IPAM_V_PATH + "host"
-	IPAM_HOST_PATH          = IPAM_HOSTS_PATH + "/%s"
-	IPAM_HOST_AFFINITY_PATH = IPAM_HOST_PATH + "/ipv%d/block/"
-	IPAM_BLOCK_PATH         = IPAM_V_PATH + "assignment/ipv%d/block/"
-	IPAM_HANDLE_PATH        = IPAM_V_PATH + "handle/"
+	ipamVersionPath      = "/calico/ipam/v2/"
+	ipamConfigPath       = ipamVersionPath + "config"
+	ipamHostsPath        = ipamVersionPath + "host"
+	ipamHostPath         = ipamHostsPath + "/%s"
+	ipamHostAffinityPath = ipamHostPath + "/ipv%d/block/"
+	ipamBlockPath        = ipamVersionPath + "assignment/ipv%d/block/"
+	ipamHandlePath       = ipamVersionPath + "handle/"
 )
 
 type IPAMConfig struct {
@@ -104,7 +106,7 @@ func (c IPAMClient) autoAssign(num int, handleID *string, attrs map[string]strin
 	if config.AutoAllocateBlocks == true {
 		rem := num - len(ips)
 		log.Printf("Need to allocate %d more addresses", rem)
-		retries := RETRIES
+		retries := etcdRetries
 		for rem > 0 {
 			// Claim a new block.
 			b, err := c.BlockReaderWriter.ClaimNewAffineBlock(host, version, pool, *config)
@@ -163,7 +165,7 @@ func (c IPAMClient) AssignIP(args AssignIPArgs) error {
 	log.Printf("Assigning IP %s to host: %s", args.IP, hostname)
 
 	blockCidr := GetBlockCIDRForAddress(args.IP)
-	for i := 0; i < RETRIES; i++ {
+	for i := 0; i < etcdRetries; i++ {
 		block, err := c.BlockReaderWriter.ReadBlock(blockCidr)
 		if err != nil {
 			if _, ok := err.(NoSuchBlockError); ok {
@@ -231,7 +233,7 @@ func (c IPAMClient) ReleaseIPs(ips []net.IP) ([]net.IP, error) {
 }
 
 func (c IPAMClient) releaseIPsFromBlock(ips []net.IP, blockCidr net.IPNet) ([]net.IP, error) {
-	for i := 0; i < RETRIES; i++ {
+	for i := 0; i < etcdRetries; i++ {
 		b, err := c.BlockReaderWriter.ReadBlock(blockCidr)
 		if err != nil {
 			if _, ok := err.(NoSuchBlockError); ok {
@@ -284,7 +286,7 @@ func (c IPAMClient) assignFromExistingBlock(
 	blockCidr net.IPNet, num int, handleID *string, attrs map[string]string, host string, affCheck *bool) ([]net.IP, error) {
 	// Limit number of retries.
 	var ips []net.IP
-	for i := 0; i < RETRIES; i++ {
+	for i := 0; i < etcdRetries; i++ {
 		log.Printf("Auto-assign from %s - retry %d", blockCidr, i)
 		b, err := c.BlockReaderWriter.ReadBlock(blockCidr)
 		if err != nil {
@@ -400,7 +402,7 @@ func (c IPAMClient) ReleaseHostAffinities(host *string) error {
 }
 
 func (c IPAMClient) ReleasePoolAffinities(pool net.IPNet) error {
-	for i := 0; i < KEY_ERROR_RETRIES; i++ {
+	for i := 0; i < keyErrRetries; i++ {
 		retry := false
 		pairs, err := c.hostBlockPairs(pool)
 		if err != nil {
@@ -443,7 +445,7 @@ func (c IPAMClient) RemoveIPAMHost(host *string) error {
 	c.ReleaseHostAffinities(&hostname)
 
 	// Remove the host ipam tree.
-	key := fmt.Sprintf(IPAM_HOST_PATH, hostname)
+	key := fmt.Sprintf(ipamHostPath, hostname)
 	opts := client.DeleteOptions{Recursive: true}
 	_, err := c.BlockReaderWriter.etcd.Delete(context.Background(), key, &opts)
 	if err != nil {
@@ -461,7 +463,7 @@ func (c IPAMClient) hostBlockPairs(pool net.IPNet) (map[string]string, error) {
 	pairs := map[string]string{}
 
 	opts := client.GetOptions{Quorum: true, Recursive: true}
-	res, err := c.BlockReaderWriter.etcd.Get(context.Background(), IPAM_HOSTS_PATH, &opts)
+	res, err := c.BlockReaderWriter.etcd.Get(context.Background(), ipamHostsPath, &opts)
 	if err != nil {
 		return nil, err
 	}
@@ -527,7 +529,7 @@ func (c IPAMClient) ReleaseByHandle(handleID string) error {
 }
 
 func (c IPAMClient) releaseByHandle(handleID string, blockCidr net.IPNet) error {
-	for i := 0; i < RETRIES; i++ {
+	for i := 0; i < etcdRetries; i++ {
 		block, err := c.BlockReaderWriter.ReadBlock(blockCidr)
 		if err != nil {
 			if _, ok := err.(NoSuchBlockError); ok {
@@ -571,7 +573,7 @@ func (c IPAMClient) releaseByHandle(handleID string, blockCidr net.IPNet) error 
 }
 
 func (c IPAMClient) readHandle(handleID string) (*AllocationHandle, error) {
-	key := IPAM_HANDLE_PATH + handleID
+	key := ipamHandlePath + handleID
 	opts := client.GetOptions{Quorum: true}
 	resp, err := c.BlockReaderWriter.etcd.Get(context.Background(), key, &opts)
 	if err != nil {
@@ -585,7 +587,7 @@ func (c IPAMClient) readHandle(handleID string) (*AllocationHandle, error) {
 }
 
 func (c IPAMClient) incrementHandle(handleID string, blockCidr net.IPNet, num int) error {
-	for i := 0; i < RETRIES; i++ {
+	for i := 0; i < etcdRetries; i++ {
 		handle, err := c.readHandle(handleID)
 		if err != nil {
 			if client.IsKeyNotFound(err) {
@@ -614,7 +616,7 @@ func (c IPAMClient) incrementHandle(handleID string, blockCidr net.IPNet, num in
 }
 
 func (c IPAMClient) decrementHandle(handleID string, blockCidr net.IPNet, num int) error {
-	for i := 0; i < RETRIES; i++ {
+	for i := 0; i < etcdRetries; i++ {
 		handle, err := c.readHandle(handleID)
 		if err != nil {
 			log.Fatal("Can't decrement block because it doesn't exist")
@@ -638,7 +640,7 @@ func (c IPAMClient) decrementHandle(handleID string, blockCidr net.IPNet, num in
 func (c IPAMClient) compareAndSwapHandle(h AllocationHandle) error {
 	// If the block has a store result, compare and swap agianst that.
 	var opts client.SetOptions
-	key := IPAM_HANDLE_PATH + h.HandleID
+	key := ipamHandlePath + h.HandleID
 
 	// Determine correct Set options.
 	if h.DbResult != "" {
@@ -682,7 +684,7 @@ func (c IPAMClient) GetAssignmentAttributes(addr net.IP) (*AllocationAttribute, 
 }
 
 func (rw BlockReaderWriter) getAffineBlocks(host string, ver IPVersion, pool *net.IPNet) ([]net.IPNet, error) {
-	key := fmt.Sprintf(IPAM_HOST_AFFINITY_PATH, host, ver.Number)
+	key := fmt.Sprintf(ipamHostAffinityPath, host, ver.Number)
 	opts := client.GetOptions{Quorum: true, Recursive: true}
 	res, err := rw.etcd.Get(context.Background(), key, &opts)
 	if err != nil {
@@ -782,7 +784,7 @@ func (rw BlockReaderWriter) claimBlockAffinity(subnet net.IPNet, host string, co
 }
 
 func (rw BlockReaderWriter) releaseBlockAffinity(host string, blockCidr net.IPNet) error {
-	for i := 0; i < RETRIES; i++ {
+	for i := 0; i < etcdRetries; i++ {
 		// Read the block from etcd.
 		b, err := rw.ReadBlock(blockCidr)
 		if err != nil {
@@ -905,7 +907,7 @@ func (rw BlockReaderWriter) ReadAllBlocks() ([]AllocationBlock, []AllocationBloc
 
 	opts := client.GetOptions{Quorum: true}
 	for _, version := range []IPVersion{IPv4, IPv6} {
-		key := fmt.Sprintf(IPAM_BLOCK_PATH, version.Number)
+		key := fmt.Sprintf(ipamBlockPath, version.Number)
 		resp, err := rw.etcd.Get(context.Background(), key, &opts)
 		if err != nil {
 			log.Println("Error reading IPAM blocks:", err)
@@ -925,9 +927,8 @@ func (rw BlockReaderWriter) ReadAllBlocks() ([]AllocationBlock, []AllocationBloc
 }
 
 func (c IPAMClient) GetIPAMConfig() (*IPAMConfig, error) {
-	key := IPAM_CONFIG_PATH
 	opts := client.GetOptions{Quorum: true}
-	resp, err := c.BlockReaderWriter.etcd.Get(context.Background(), key, &opts)
+	resp, err := c.BlockReaderWriter.etcd.Get(context.Background(), ipamConfigPath, &opts)
 	if err != nil {
 		if client.IsKeyNotFound(err) {
 			cfg := IPAMConfig{
@@ -971,8 +972,7 @@ func (c IPAMClient) SetIPAMConfig(cfg IPAMConfig) error {
 		log.Println("Error converting IPAM config to json:", err)
 		return err
 	}
-	key := IPAM_CONFIG_PATH
-	_, err = c.BlockReaderWriter.etcd.Set(context.Background(), key, string(j), nil)
+	_, err = c.BlockReaderWriter.etcd.Set(context.Background(), ipamConfigPath, string(j), nil)
 	return nil
 }
 
@@ -1016,13 +1016,13 @@ func Blocks(pool net.IPNet) []net.IPNet {
 
 func blockDatastorePath(blockCidr net.IPNet) string {
 	version := GetIPVersion(blockCidr.IP)
-	path := fmt.Sprintf(IPAM_BLOCK_PATH, version.Number)
+	path := fmt.Sprintf(ipamBlockPath, version.Number)
 	return path + strings.Replace(blockCidr.String(), "/", "-", 1)
 }
 
 func blockHostAffinityPath(blockCidr net.IPNet, host string) string {
 	version := GetIPVersion(blockCidr.IP)
-	path := fmt.Sprintf(IPAM_HOST_AFFINITY_PATH, host, version.Number)
+	path := fmt.Sprintf(ipamHostAffinityPath, host, version.Number)
 	return path + strings.Replace(blockCidr.String(), "/", "-", 1)
 }
 
