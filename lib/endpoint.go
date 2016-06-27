@@ -20,7 +20,7 @@ type Endpoint struct {
 	State          string `json:"state"`
 	Name           string `json:"name"`
 	Mac            string `json:"mac"`
-	ProfileID      []string `json:"profile_ids"`
+	ProfileIDs     []string `json:"profile_ids"`
 	IPv4Nets       []string `json:"ipv4_nets"`
 	IPv6Nets       []string `json:"ipv6_nets"`
 	Labels         map[string]string `json:"labels,omitempty"`
@@ -139,14 +139,14 @@ func (e *Endpoint) Write(etcd client.KeysAPI) error {
 	return nil
 }
 
-func GetEndpoint(etcd client.KeysAPI, w Workload) (bool, Endpoint, error) {
+func GetEndpoint(etcd client.KeysAPI, w Workload) (*Endpoint, error) {
 	key := fmt.Sprintf("/calico/v1/host/%s/workload/%s/%s/endpoint/", w.Hostname, w.OrchestratorID, w.WorkloadID)
 	resp, err := etcd.Get(context.Background(), key, &client.GetOptions{Recursive:true})
 	if err != nil {
 		if client.IsKeyNotFound(err) {
-			return false, Endpoint{}, nil
+			return nil, nil
 		} else {
-			return false, Endpoint{}, err
+			return nil, err
 		}
 
 	} else {
@@ -160,23 +160,23 @@ func GetEndpoint(etcd client.KeysAPI, w Workload) (bool, Endpoint, error) {
 					workloadID := matches[3]
 					endpointID := matches[4]
 
-					endpoint := Endpoint{
+					endpoint := &Endpoint{
 						Hostname:hostname,
 						OrchestratorID:orchestratorID,
 						WorkloadID:workloadID,
 						EndpointID:endpointID}
 
-					err := json.Unmarshal([]byte(node.Value), &endpoint)
+					err := json.Unmarshal([]byte(node.Value), endpoint)
 					if err != nil {
-						return false, Endpoint{}, err
+						return nil, err
 					}
-					return true, endpoint, nil
+					return endpoint, nil
 				}
 			}
 		}
 	}
 
-	return false, Endpoint{}, nil
+	return nil, nil
 }
 
 func processNode(n *client.Node, endpoints map[string]LabelOnlyEndpoint) {
