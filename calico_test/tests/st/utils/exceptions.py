@@ -1,4 +1,4 @@
-# Copyright 2015 Metaswitch Networks
+# Copyright (c) 2015-2016 Tigera, Inc. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -40,4 +40,3 @@ class CommandExecError(CalledProcessError):
                (self.called_process_error.cmd,
                 self.called_process_error.returncode,
                 self.called_process_error.output)
-
