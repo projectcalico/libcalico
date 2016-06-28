@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/coreos/etcd/client"
+	"github.com/projectcalico/libcalico/lib"
 	"golang.org/x/net/context"
 	"log"
 	"net"
@@ -83,18 +84,20 @@ func (c IPAMClient) AutoAssign(args AutoAssignArgs) ([]net.IP, []net.IP, error) 
 	hostname := decideHostname(args.Hostname)
 	log.Printf("Assigning for host: %s", hostname)
 
-	// Assign addresses.
-	var err error
-	var v4list, v6list []net.IP
-	v4list, err = c.autoAssign(args.Num4, args.HandleID, args.Attrs, args.IPv4Pool, ipv4, hostname)
+	// Assign IPv4 addresses.
+	v4list, err := c.autoAssign(args.Num4, args.HandleID, args.Attrs, args.IPv4Pool, ipv4, hostname)
 	if err != nil {
 		log.Printf("Error assigning IPV4 addresses: %s", err)
-	} else {
-		// If no err assigning V4, try to assign any V6.
-		v6list, err = c.autoAssign(args.Num6, args.HandleID, args.Attrs, args.IPv6Pool, ipv6, hostname)
+		return nil, nil, err
 	}
 
-	return v4list, v6list, err
+	// If no err assigning V4, try to assign any V6.
+	v6list, err := c.autoAssign(args.Num6, args.HandleID, args.Attrs, args.IPv6Pool, ipv6, hostname)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return v4list, v6list, nil
 }
 
 func (c IPAMClient) autoAssign(num int, handleID *string, attrs map[string]string, pool *net.IPNet, version ipVersion, host string) ([]net.IP, error) {
@@ -379,7 +382,11 @@ func (c IPAMClient) ClaimAffinity(cidr net.IPNet, host *string) error {
 	// Determine the hostname to use.
 	hostname := decideHostname(host)
 
-	// TODO: Verify the requested CIDR falls within a configured pool.
+	// Verify the requested CIDR falls within a configured pool.
+	if !c.blockReaderWriter.withinConfiguredPools(cidr.IP) {
+		estr := fmt.Sprintf("The requested CIDR (%s) is not within any configured pools.", cidr.String())
+		return errors.New(estr)
+	}
 
 	// Get IPAM config.
 	cfg, err := c.GetIPAMConfig()
@@ -778,12 +785,20 @@ func (rw blockReaderWriter) claimNewAffineBlock(
 	// all configured pools.
 	var pools []net.IPNet
 	if pool != nil {
-		// TODO: Validate the given pool is actually configured.
+		// Validate the given pool is actually configured.
+		if !rw.withinConfiguredPools(pool.IP) {
+			estr := fmt.Sprintf("The given pool (%s) does not exist", pool.String())
+			return nil, errors.New(estr)
+		}
 		pools = []net.IPNet{*pool}
 	} else {
-		// TODO: Default to all configured pools.
-		_, p, _ := net.ParseCIDR("192.168.0.0/16")
-		pools = []net.IPNet{*p}
+		// Default to all configured pools.
+		ver := getIPVersion(pool.IP)
+		allPools := libcalico.GetPools(rw.etcd, string(ver.Number))
+		for _, p := range allPools {
+			_, c, _ := net.ParseCIDR(p.Cidr)
+			pools = append(pools, *c)
+		}
 	}
 
 	// Iterate through pools to find a new block.
@@ -1042,6 +1057,18 @@ func (c IPAMClient) SetIPAMConfig(cfg IPAMConfig) error {
 	}
 	_, err = c.blockReaderWriter.etcd.Set(context.Background(), ipamConfigPath, string(j), nil)
 	return nil
+}
+
+func (rw blockReaderWriter) withinConfiguredPools(ip net.IP) bool {
+	ver := getIPVersion(ip)
+	allPools := libcalico.GetPools(rw.etcd, string(ver.Number))
+	for _, p := range allPools {
+		_, c, _ := net.ParseCIDR(p.Cidr)
+		if c.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // IPAMClient is a client which can be used to configure global IPAM configuration,
