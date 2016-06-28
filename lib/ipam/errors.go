@@ -12,7 +12,7 @@ type AffinityClaimedError struct {
 }
 
 func (e AffinityClaimedError) Error() string {
-	return fmt.Sprintf("Block %s already claimed by %s", e.Block.Cidr, e.Block.HostAffinity)
+	return fmt.Sprintf("%s already claimed by %s", e.Block.Cidr, e.Block.HostAffinity)
 }
 
 // CASError incidates an error performing a compare-and-swap atomic update.
@@ -22,11 +22,10 @@ func (e CASError) Error() string {
 	return string(e)
 }
 
-// NoFreeBlocksError indicates that the user tried to claim a block
-// but there are none available.
-type NoFreeBlocksError string
+// InvalidSizeError indicates that the requested size is not valid.
+type InvalidSizeError string
 
-func (e NoFreeBlocksError) Error() string {
+func (e InvalidSizeError) Error() string {
 	return string(e)
 }
 
@@ -38,19 +37,19 @@ func (e IPAMConfigConflictError) Error() string {
 	return string(e)
 }
 
-// NoSuchBlock error indicates that the requested block does not exist.
-type NoSuchBlockError struct {
+// noSuchBlock error indicates that the requested block does not exist.
+type noSuchBlockError struct {
 	Cidr net.IPNet
 }
 
-func (e NoSuchBlockError) Error() string {
+func (e noSuchBlockError) Error() string {
 	return fmt.Sprintf("No such block: %s", e.Cidr)
 }
 
-// InvalidBlockSizeError indicates that the requested block size does not match
-// the expected block size.
-type InvalidBlockSizeError string
+// noFreeBlocksError indicates an attempt to claim a block
+// when there are none available.
+type noFreeBlocksError string
 
-func (e InvalidBlockSizeError) Error() string {
+func (e noFreeBlocksError) Error() string {
 	return string(e)
 }

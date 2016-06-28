@@ -238,7 +238,7 @@ func (c IPAMClient) AssignIP(args AssignIPArgs) error {
 	for i := 0; i < etcdRetries; i++ {
 		block, err := c.blockReaderWriter.readBlock(blockCidr)
 		if err != nil {
-			if _, ok := err.(NoSuchBlockError); ok {
+			if _, ok := err.(noSuchBlockError); ok {
 				// Block doesn't exist, we need to create it.  First,
 				// validate the given IP address is within a configured pool.
 				if !c.blockReaderWriter.withinConfiguredPools(args.IP) {
@@ -312,7 +312,7 @@ func (c IPAMClient) releaseIPsFromBlock(ips []net.IP, blockCidr net.IPNet) ([]ne
 	for i := 0; i < etcdRetries; i++ {
 		b, err := c.blockReaderWriter.readBlock(blockCidr)
 		if err != nil {
-			if _, ok := err.(NoSuchBlockError); ok {
+			if _, ok := err.(noSuchBlockError); ok {
 				// The block does not exist - all addresses must be unassigned.
 				return ips, nil
 			} else {
@@ -405,8 +405,8 @@ func (c IPAMClient) assignFromExistingBlock(
 func (c IPAMClient) ClaimAffinity(cidr net.IPNet, host *string) error {
 	// Validate that the given CIDR is at least as big as a block.
 	if !largerThanBlock(cidr) {
-		estr := fmt.Sprintf("The requested CIDR (%s) is smaller than the minimum block size.", cidr.String())
-		return InvalidBlockSizeError(estr)
+		estr := fmt.Sprintf("The requested CIDR (%s) is smaller than the minimum.", cidr.String())
+		return InvalidSizeError(estr)
 	}
 
 	// Determine the hostname to use.
@@ -444,7 +444,8 @@ func (c IPAMClient) ClaimAffinity(cidr net.IPNet, host *string) error {
 func (c IPAMClient) ReleaseAffinity(cidr net.IPNet, host *string) error {
 	// Validate that the given CIDR is at least as big as a block.
 	if !largerThanBlock(cidr) {
-		return InvalidBlockSizeError("The requested CIDR is smaller than the minimum block size.")
+		estr := fmt.Sprintf("The requested CIDR (%s) is smaller than the minimum.", cidr.String())
+		return InvalidSizeError(estr)
 	}
 
 	// Determine the hostname to use.
@@ -512,7 +513,7 @@ func (c IPAMClient) ReleasePoolAffinities(pool net.IPNet) error {
 				log.Printf("Error: %s", err)
 				if _, ok := err.(AffinityClaimedError); ok {
 					retry = true
-				} else if _, ok := err.(NoSuchBlockError); ok {
+				} else if _, ok := err.(noSuchBlockError); ok {
 					continue
 				} else {
 					return err
@@ -630,7 +631,7 @@ func (c IPAMClient) releaseByHandle(handleID string, blockCidr net.IPNet) error 
 	for i := 0; i < etcdRetries; i++ {
 		block, err := c.blockReaderWriter.readBlock(blockCidr)
 		if err != nil {
-			if _, ok := err.(NoSuchBlockError); ok {
+			if _, ok := err.(noSuchBlockError); ok {
 				// Block doesn't exist, so all addresses are already
 				// unallocated.  This can happen when a handle is
 				// overestimating the number of assigned addresses.
@@ -836,32 +837,6 @@ func (c IPAMClient) SetIPAMConfig(cfg IPAMConfig) error {
 	}
 	_, err = c.blockReaderWriter.etcd.Set(context.Background(), ipamConfigPath, string(j), nil)
 	return nil
-}
-
-// Return the list of block CIDRs which fall within
-// the given pool.
-func blocks(pool net.IPNet) []net.IPNet {
-	// Determine the IP type to use.
-	ipVersion := getIPVersion(pool.IP)
-	nets := []net.IPNet{}
-	ip := pool.IP
-	for pool.Contains(ip) {
-		nets = append(nets, net.IPNet{ip, ipVersion.BlockPrefixMask})
-		ip = incrementIP(ip, BLOCK_SIZE)
-	}
-	return nets
-}
-
-func blockDatastorePath(blockCidr net.IPNet) string {
-	version := getIPVersion(blockCidr.IP)
-	path := fmt.Sprintf(ipamBlockPath, version.Number)
-	return path + strings.Replace(blockCidr.String(), "/", "-", 1)
-}
-
-func blockHostAffinityPath(blockCidr net.IPNet, host string) string {
-	version := getIPVersion(blockCidr.IP)
-	path := fmt.Sprintf(ipamHostAffinityPath, host, version.Number)
-	return path + strings.Replace(blockCidr.String(), "/", "-", 1)
 }
 
 func decideHostname(host *string) string {

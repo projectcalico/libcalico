@@ -82,7 +82,7 @@ func (rw blockReaderWriter) claimNewAffineBlock(
 			}
 		}
 	}
-	return nil, NoFreeBlocksError("No Free Blocks")
+	return nil, noFreeBlocksError("No Free Blocks")
 }
 
 func (rw blockReaderWriter) claimBlockAffinity(subnet net.IPNet, host string, config IPAMConfig) error {
@@ -92,7 +92,7 @@ func (rw blockReaderWriter) claimBlockAffinity(subnet net.IPNet, host string, co
 	rw.etcd.Set(context.Background(), affinityPath, "", nil)
 
 	// Create the new block.
-	block := NewBlock(subnet)
+	block := newBlock(subnet)
 	block.HostAffinity = &host
 	block.StrictAffinity = config.StrictAffinity
 
@@ -230,11 +230,11 @@ func (rw blockReaderWriter) readBlock(blockCidr net.IPNet) (*allocationBlock, er
 	if err != nil {
 		log.Println("Error reading IPAM block:", err)
 		if client.IsKeyNotFound(err) {
-			return nil, NoSuchBlockError{Cidr: blockCidr}
+			return nil, noSuchBlockError{Cidr: blockCidr}
 		}
 		return nil, err
 	}
-	b := NewBlock(blockCidr)
+	b := newBlock(blockCidr)
 	json.Unmarshal([]byte(resp.Node.Value), &b)
 	b.DbResult = resp.Node.Value
 	return &b, nil
@@ -277,4 +277,30 @@ func (rw blockReaderWriter) withinConfiguredPools(ip net.IP) bool {
 		}
 	}
 	return false
+}
+
+func blockDatastorePath(blockCidr net.IPNet) string {
+	version := getIPVersion(blockCidr.IP)
+	path := fmt.Sprintf(ipamBlockPath, version.Number)
+	return path + strings.Replace(blockCidr.String(), "/", "-", 1)
+}
+
+func blockHostAffinityPath(blockCidr net.IPNet, host string) string {
+	version := getIPVersion(blockCidr.IP)
+	path := fmt.Sprintf(ipamHostAffinityPath, host, version.Number)
+	return path + strings.Replace(blockCidr.String(), "/", "-", 1)
+}
+
+// Return the list of block CIDRs which fall within
+// the given pool.
+func blocks(pool net.IPNet) []net.IPNet {
+	// Determine the IP type to use.
+	ipVersion := getIPVersion(pool.IP)
+	nets := []net.IPNet{}
+	ip := pool.IP
+	for pool.Contains(ip) {
+		nets = append(nets, net.IPNet{ip, ipVersion.BlockPrefixMask})
+		ip = incrementIP(ip, blockSize)
+	}
+	return nets
 }
