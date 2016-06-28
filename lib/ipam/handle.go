@@ -6,13 +6,13 @@ import (
 	"net"
 )
 
-type AllocationHandle struct {
+type allocationHandle struct {
 	HandleID string         `json:"id"`
 	Block    map[string]int `json:"block"`
 	DbResult string         `json:"-"`
 }
 
-func (h AllocationHandle) IncrementBlock(blockCidr net.IPNet, num int) int {
+func (h allocationHandle) incrementBlock(blockCidr net.IPNet, num int) int {
 	blockId := blockCidr.String()
 	newNum := num
 	if val, ok := h.Block[blockId]; ok {
@@ -24,7 +24,7 @@ func (h AllocationHandle) IncrementBlock(blockCidr net.IPNet, num int) int {
 	return newNum
 }
 
-func (h AllocationHandle) DecrementBlock(blockCidr net.IPNet, num int) (*int, error) {
+func (h allocationHandle) decrementBlock(blockCidr net.IPNet, num int) (*int, error) {
 	blockId := blockCidr.String()
 	if current, ok := h.Block[blockId]; !ok {
 		// This entry doesn't exist.
@@ -46,6 +46,6 @@ func (h AllocationHandle) DecrementBlock(blockCidr net.IPNet, num int) (*int, er
 	}
 }
 
-func (h AllocationHandle) Empty() bool {
+func (h allocationHandle) empty() bool {
 	return len(h.Block) == 0
 }
