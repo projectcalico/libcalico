@@ -12,4 +12,3 @@ caliconode.created
 calico_containers/pycalico.egg-info/
 
 vendor/
-glide.lock
