@@ -24,7 +24,7 @@ from copy import copy
 from subprocess32 import check_output, check_call, CalledProcessError, STDOUT
 from netaddr import IPAddress
 
-from pycalico.util import IPV6_RE
+from util import get_ipv6_link_local
 
 _log = logging.getLogger(__name__)
 _log.addHandler(logging.NullHandler())
@@ -207,13 +207,7 @@ def add_ns_default_route(namespace, veth_name_host, veth_name_ns):
     """
     # Attempt to fetch the IPv6 address for the host veth. Failure indicates
     # that this host doesn't support IPv6.
-    next_hop_6 = None
-    try:
-        ip_addr_output = check_output(["ip", "-6", "addr", "show", "dev", veth_name_host])
-        next_hop_6 = re.search(IPV6_RE, ip_addr_output).group(1)
-    except (CalledProcessError, OSError, AttributeError) as e:
-        _log.debug("Failed to get IPv6 address for veth %s. Error: %s",
-                   veth_name_host, e)
+    next_hop_6 = get_ipv6_link_local(veth_name_host)
 
     with NamedNamespace(namespace) as ns:
         # IPv4

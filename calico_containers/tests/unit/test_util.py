@@ -620,3 +620,13 @@ class TestUtil(unittest.TestCase):
                 util.verify_ports(input_list)
         else:
             self.assertIsNone(util.verify_ports(input_list))
+    @patch("pycalico.util.check_output", autospec=True)
+    def test_get_ipv6_link_local(self, m_check_output):
+        output = """3: eth1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qlen 1000
+                        inet6 fd80:24e2:f998:72d7::2/112 scope global
+                            valid_lft forever preferred_lft forever
+                        inet6 fe80::a00:27ff:fe71:610f/64 scope link
+                            valid_lft forever preferred_lft forever"""
+        m_check_output.return_value = output
+        self.assertEqual(util.get_ipv6_link_local("eth1"), "fd80:24e2:f998:72d7::2")
+        m_check_output.assert_called_with(["ip", "-6", "addr", "show", "dev", "eth1"])
