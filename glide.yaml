@@ -1,0 +1,9 @@
+package: github.com/projectcalico/libcalico
+import:
+- package: github.com/coreos/etcd
+  subpackages:
+  - client
+- package: github.com/satori/go.uuid
+- package: golang.org/x/net
+  subpackages:
+  - context
