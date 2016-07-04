@@ -409,7 +409,7 @@ def verify_hostname(hostname):
 
     # Hostname labels may consist of numbers, letters and hyphens, but may not
     # end or begin with a hyphen.
-    allowed = re.compile(r"(?!-)[a-z\d-]{1,63}(?<!-)$", re.IGNORECASE)
+    allowed = re.compile(r"(?!-)[_a-z\d-]{1,63}(?<!-)$", re.IGNORECASE)
     for part in hostname.split('.'):
         if not allowed.match(part):
             err_mess = ("Hostname labels (parts delimited by periods) may "
