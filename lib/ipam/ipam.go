@@ -131,7 +131,7 @@ func (c IPAMClient) autoAssign(num int, handleID *string, attrs map[string]strin
 	// Start by trying to assign from one of the host-affine blocks.  We
 	// always do strict checking at this stage, so it doesn't matter whether
 	// globally we have strict_affinity or not.
-	glog.V(2).Infof("Looking for addresses in current affine blocks for host %s", host)
+	glog.V(2).Infof("Looking for addresses in current affine blocks for host '%s'", host)
 	affBlocks, err := c.blockReaderWriter.getAffineBlocks(host, version, pool)
 	if err != nil {
 		return nil, err
@@ -140,13 +140,13 @@ func (c IPAMClient) autoAssign(num int, handleID *string, attrs map[string]strin
 	ips := []net.IP{}
 	for len(ips) < num {
 		if len(affBlocks) == 0 {
-			glog.V(2).Infof("Ran out of affine blocks for host", host)
+			glog.V(2).Infof("Ran out of affine blocks for host '%s'", host)
 			break
 		}
 		cidr := affBlocks[0]
 		affBlocks = affBlocks[1:]
 		ips, _ = c.assignFromExistingBlock(cidr, num, handleID, attrs, host, nil)
-		glog.V(2).Infof("Block provided addresses:", ips)
+		glog.V(2).Infof("Block provided addresses: %v", ips)
 	}
 
 	// If there are still addresses to allocate, then we've run out of
@@ -161,16 +161,14 @@ func (c IPAMClient) autoAssign(num int, handleID *string, attrs map[string]strin
 		rem := num - len(ips)
 		glog.V(2).Infof("Need to allocate %d more addresses", rem)
 		retries := etcdRetries
-		for rem > 0 {
+		for rem > 0 && retries > 0 {
 			// Claim a new block.
+			retries = retries - 1
 			b, err := c.blockReaderWriter.claimNewAffineBlock(host, version, pool, *config)
 			if err != nil {
-				glog.V(2).Infof("Error claiming new block:", err)
-				retries = retries - 1
-				if retries == 0 {
-					glog.V(2).Infof("Max retries hit")
-					return nil, errors.New("Max retries hit")
-				}
+				// Error claiming new block.
+				glog.V(2).Infof("Error claiming new block: %s", err)
+				return nil, err
 			} else {
 				// Claim successful.  Assign addresses from the new block.
 				glog.V(2).Infof("Claimed new block - assigning addresses")
@@ -182,6 +180,10 @@ func (c IPAMClient) autoAssign(num int, handleID *string, attrs map[string]strin
 				ips = append(ips, newIPs...)
 				rem = num - len(ips)
 			}
+		}
+
+		if retries == 0 {
+			return nil, errors.New("Max retries hit")
 		}
 	}
 
@@ -234,7 +236,12 @@ func (c IPAMClient) AssignIP(args AssignIPArgs) error {
 	hostname := decideHostname(args.Hostname)
 	glog.V(2).Infof("Assigning IP %s to host: %s", args.IP, hostname)
 
+	if !c.blockReaderWriter.withinConfiguredPools(args.IP) {
+		return errors.New("The provided IP address is not in a configured pool\n")
+	}
+
 	blockCidr := getBlockCIDRForAddress(args.IP)
+	glog.V(2).Infof("IP is in block '%s'", blockCidr.String())
 	for i := 0; i < etcdRetries; i++ {
 		block, err := c.blockReaderWriter.readBlock(blockCidr)
 		if err != nil {
@@ -247,8 +254,7 @@ func (c IPAMClient) AssignIP(args AssignIPArgs) error {
 				}
 				glog.V(2).Infof("Block for IP %s does not yet exist, creating", args.IP)
 				cfg := IPAMConfig{StrictAffinity: false, AutoAllocateBlocks: true}
-				version := getIPVersion(args.IP)
-				newBlockCidr, err := c.blockReaderWriter.claimNewAffineBlock(hostname, version, nil, cfg)
+				err := c.blockReaderWriter.claimBlockAffinity(blockCidr, hostname, cfg)
 				if err != nil {
 					if _, ok := err.(*AffinityClaimedError); ok {
 						glog.V(2).Infof("Someone else claimed block %s before us", blockCidr)
@@ -257,7 +263,7 @@ func (c IPAMClient) AssignIP(args AssignIPArgs) error {
 						return err
 					}
 				}
-				glog.V(2).Infof("Claimed new block: %s", newBlockCidr)
+				glog.V(2).Infof("Claimed new block: %s", blockCidr)
 				continue
 			} else {
 				// Unexpected error
@@ -363,12 +369,12 @@ func (c IPAMClient) assignFromExistingBlock(
 	// Limit number of retries.
 	var ips []net.IP
 	for i := 0; i < etcdRetries; i++ {
-		glog.V(2).Infof("Auto-assign from %s - retry %d", blockCidr, i)
+		glog.V(2).Infof("Auto-assign from %s - retry %d", blockCidr.String(), i)
 		b, err := c.blockReaderWriter.readBlock(blockCidr)
 		if err != nil {
 			return nil, err
 		}
-		glog.V(2).Infof("Got block:", b)
+		glog.V(2).Infof("Got block: %v", b)
 		ips, err = b.autoAssign(num, handleID, host, attrs, true)
 		if err != nil {
 			glog.V(2).Infof("Error in auto assign:", err)

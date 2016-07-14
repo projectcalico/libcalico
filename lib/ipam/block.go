@@ -325,7 +325,7 @@ func (b *allocationBlock) findOrAddAttribute(handleID *string, attrs map[string]
 	}
 
 	// Does not exist - add it.
-	glog.V(2).Infof("New attribute", attr)
+	glog.V(2).Infof("New attribute: %+v", attr)
 	attrIndex := len(b.Attributes)
 	b.Attributes = append(b.Attributes, attr)
 	return attrIndex

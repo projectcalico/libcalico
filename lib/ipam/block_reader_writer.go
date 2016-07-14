@@ -21,8 +21,14 @@ func (rw blockReaderWriter) getAffineBlocks(host string, ver ipVersion, pool *ne
 	opts := client.GetOptions{Quorum: true, Recursive: true}
 	res, err := rw.etcd.Get(context.Background(), key, &opts)
 	if err != nil {
-		glog.V(2).Infof("Error reading blocks from etcd", err)
-		return nil, err
+		if client.IsKeyNotFound(err) {
+			// The block path does not exist yet.  This is OK - it means
+			// there are no affine blocks.
+			return []net.IPNet{}, nil
+		} else {
+			glog.V(2).Infof("Error reading blocks from etcd: %s", err)
+			return nil, err
+		}
 	}
 
 	ids := []net.IPNet{}
@@ -49,6 +55,7 @@ func (rw blockReaderWriter) claimNewAffineBlock(
 	var pools []net.IPNet
 	if pool != nil {
 		// Validate the given pool is actually configured.
+		// TODO: Exact match pools check.
 		if !rw.withinConfiguredPools(pool.IP) {
 			estr := fmt.Sprintf("The given pool (%s) does not exist", pool.String())
 			return nil, errors.New(estr)
@@ -56,16 +63,20 @@ func (rw blockReaderWriter) claimNewAffineBlock(
 		pools = []net.IPNet{*pool}
 	} else {
 		// Default to all configured pools.
-		ver := getIPVersion(pool.IP)
-		allPools := libcalico.GetPools(rw.etcd, string(ver.Number))
+		allPools := libcalico.GetPools(rw.etcd, fmt.Sprintf("%d", version.Number))
 		for _, p := range allPools {
 			_, c, _ := net.ParseCIDR(p.Cidr)
 			pools = append(pools, *c)
 		}
 	}
 
+	// If there are no pools, we cannot assign addresses.
+	if len(pools) == 0 {
+		return nil, errors.New("No configured Calico pools")
+	}
+
 	// Iterate through pools to find a new block.
-	glog.V(2).Infof("Claiming a new affine block for host", host)
+	glog.V(2).Infof("Claiming a new affine block for host '%s'", host)
 	for _, pool := range pools {
 		for _, subnet := range blocks(pool) {
 			// Check if a block already exists for this subnet.
@@ -73,7 +84,7 @@ func (rw blockReaderWriter) claimNewAffineBlock(
 			_, err := rw.etcd.Get(context.Background(), key, nil)
 			if client.IsKeyNotFound(err) {
 				// The block does not yet exist in etcd.  Try to grab it.
-				glog.V(2).Infof("Found free block:", subnet)
+				glog.V(2).Infof("Found free block: %+v", subnet)
 				err = rw.claimBlockAffinity(subnet, host, config)
 				return &subnet, err
 			} else if err != nil {
@@ -191,10 +202,10 @@ func (rw blockReaderWriter) compareAndSwapBlock(b allocationBlock) error {
 
 	// Determine correct Set options.
 	if b.DbResult != "" {
-		glog.V(2).Infof("CAS update block:", b.Cidr)
+		glog.V(2).Infof("CAS update block: %s", b.Cidr.String())
 		opts = client.SetOptions{PrevExist: client.PrevExist, PrevValue: b.DbResult}
 	} else {
-		glog.V(2).Infof("CAS write new block:", b.Cidr)
+		glog.V(2).Infof("CAS write new block: %s", b.Cidr.String())
 		opts = client.SetOptions{PrevExist: client.PrevNoExist}
 	}
 
@@ -228,7 +239,6 @@ func (rw blockReaderWriter) readBlock(blockCidr net.IPNet) (*allocationBlock, er
 	opts := client.GetOptions{Quorum: true}
 	resp, err := rw.etcd.Get(context.Background(), key, &opts)
 	if err != nil {
-		glog.V(2).Infof("Error reading IPAM block:", err)
 		if client.IsKeyNotFound(err) {
 			return nil, noSuchBlockError{Cidr: blockCidr}
 		}
@@ -269,7 +279,7 @@ func (rw blockReaderWriter) readAllBlocks() ([]allocationBlock, []allocationBloc
 
 func (rw blockReaderWriter) withinConfiguredPools(ip net.IP) bool {
 	ver := getIPVersion(ip)
-	allPools := libcalico.GetPools(rw.etcd, string(ver.Number))
+	allPools := libcalico.GetPools(rw.etcd, fmt.Sprintf("%d", ver.Number))
 	for _, p := range allPools {
 		_, c, _ := net.ParseCIDR(p.Cidr)
 		if c.Contains(ip) {
