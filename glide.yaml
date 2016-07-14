@@ -4,6 +4,7 @@ import:
   subpackages:
   - client
 - package: github.com/satori/go.uuid
+- package: github.com/golang/glog
 - package: golang.org/x/net
   subpackages:
   - context

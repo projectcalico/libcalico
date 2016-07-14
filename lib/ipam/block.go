@@ -3,7 +3,7 @@ package ipam
 import (
 	"errors"
 	"fmt"
-	"log"
+	"github.com/golang/glog"
 	"math/big"
 	"net"
 	"reflect"
@@ -153,7 +153,7 @@ func (b *allocationBlock) release(addresses []net.IP) ([]net.IP, map[string]int,
 		// Check if allocated.
 		attrIdx := b.Allocations[ordinal]
 		if attrIdx == nil {
-			log.Println("Asked to release address that was not allocated")
+			glog.V(2).Infof("Asked to release address that was not allocated")
 			unallocated = append(unallocated, ip)
 			continue
 		}
@@ -189,7 +189,7 @@ func (b *allocationBlock) release(addresses []net.IP) ([]net.IP, map[string]int,
 		}
 	}
 	if len(attrsToDelete) != 0 {
-		log.Printf("Deleting attributes: %s", attrsToDelete)
+		glog.V(2).Infof("Deleting attributes: %s", attrsToDelete)
 		b.deleteAttributes(attrsToDelete, ordinals)
 	}
 
@@ -207,7 +207,7 @@ func (b *allocationBlock) deleteAttributes(delIndexes, ordinals []int) {
 	y := 0 // Next free slot in the new attributes list.
 	for x := range b.Attributes {
 		if !intInSlice(x, delIndexes) {
-			log.Printf("%d in %s", x, delIndexes)
+			glog.V(2).Infof("%d in %s", x, delIndexes)
 			// Attribute at x is not being deleted.  Build a mapping
 			// of old attribute index (x) to new attribute index (y).
 			newIndex := y
@@ -258,10 +258,10 @@ func (b allocationBlock) attributeIndexesByHandle(handleID string) []int {
 
 func (b *allocationBlock) releaseByHandle(handleID string) int {
 	attrIndexes := b.attributeIndexesByHandle(handleID)
-	log.Println("Attribute indexes to release:", attrIndexes)
+	glog.V(2).Infof("Attribute indexes to release:", attrIndexes)
 	if len(attrIndexes) == 0 {
 		// Nothing to release.
-		log.Println("No addresses assigned to handle", handleID)
+		glog.V(2).Infof("No addresses assigned to handle", handleID)
 		return 0
 	}
 
@@ -319,13 +319,13 @@ func (b *allocationBlock) findOrAddAttribute(handleID *string, attrs map[string]
 	attr := allocationAttribute{handleID, attrs}
 	for idx, existing := range b.Attributes {
 		if reflect.DeepEqual(attr, existing) {
-			log.Println("Attribute already exists")
+			glog.V(2).Infof("Attribute already exists")
 			return idx
 		}
 	}
 
 	// Does not exist - add it.
-	log.Println("New attribute", attr)
+	glog.V(2).Infof("New attribute", attr)
 	attrIndex := len(b.Attributes)
 	b.Attributes = append(b.Attributes, attr)
 	return attrIndex
@@ -391,7 +391,7 @@ func ipToOrdinal(ip net.IP, b allocationBlock) int {
 	ord := big.NewInt(0).Sub(ip_int, base_int).Int64()
 	if ord < 0 || ord >= blockSize {
 		// IP address not in the given block.
-		log.Fatalf("IP %s not in block %s", ip, b.Cidr)
+		glog.Fatalf("IP %s not in block %s", ip, b.Cidr)
 	}
 	return int(ord)
 }

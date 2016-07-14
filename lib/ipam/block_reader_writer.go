@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/coreos/etcd/client"
+	"github.com/golang/glog"
 	"github.com/projectcalico/libcalico/lib"
 	"golang.org/x/net/context"
-	"log"
 	"net"
 	"strings"
 )
@@ -21,7 +21,7 @@ func (rw blockReaderWriter) getAffineBlocks(host string, ver ipVersion, pool *ne
 	opts := client.GetOptions{Quorum: true, Recursive: true}
 	res, err := rw.etcd.Get(context.Background(), key, &opts)
 	if err != nil {
-		log.Println("Error reading blocks from etcd", err)
+		glog.V(2).Infof("Error reading blocks from etcd", err)
 		return nil, err
 	}
 
@@ -65,7 +65,7 @@ func (rw blockReaderWriter) claimNewAffineBlock(
 	}
 
 	// Iterate through pools to find a new block.
-	log.Println("Claiming a new affine block for host", host)
+	glog.V(2).Infof("Claiming a new affine block for host", host)
 	for _, pool := range pools {
 		for _, subnet := range blocks(pool) {
 			// Check if a block already exists for this subnet.
@@ -73,11 +73,11 @@ func (rw blockReaderWriter) claimNewAffineBlock(
 			_, err := rw.etcd.Get(context.Background(), key, nil)
 			if client.IsKeyNotFound(err) {
 				// The block does not yet exist in etcd.  Try to grab it.
-				log.Println("Found free block:", subnet)
+				glog.V(2).Infof("Found free block:", subnet)
 				err = rw.claimBlockAffinity(subnet, host, config)
 				return &subnet, err
 			} else if err != nil {
-				log.Println("Error checking block:", err)
+				glog.V(2).Infof("Error checking block:", err)
 				return nil, err
 			}
 		}
@@ -87,7 +87,7 @@ func (rw blockReaderWriter) claimNewAffineBlock(
 
 func (rw blockReaderWriter) claimBlockAffinity(subnet net.IPNet, host string, config IPAMConfig) error {
 	// Claim the block in etcd.
-	log.Printf("Host %s claiming block affinity for %s", host, subnet)
+	glog.V(2).Infof("Host %s claiming block affinity for %s", host, subnet)
 	affinityPath := blockHostAffinityPath(subnet, host)
 	rw.etcd.Set(context.Background(), affinityPath, "", nil)
 
@@ -101,16 +101,16 @@ func (rw blockReaderWriter) claimBlockAffinity(subnet net.IPNet, host string, co
 	if err != nil {
 		if _, ok := err.(CASError); ok {
 			// Block already exists, check affinity.
-			log.Println("Error claiming block affinity:", err)
+			glog.V(2).Infof("Error claiming block affinity:", err)
 			b, err := rw.readBlock(subnet)
 			if err != nil {
-				log.Println("Error reading block:", err)
+				glog.V(2).Infof("Error reading block:", err)
 				return err
 			}
 			if b.HostAffinity != nil && *b.HostAffinity == host {
 				// Block has affinity to this host, meaning another
 				// process on this host claimed it.
-				log.Printf("Block %s already claimed by us.  Success", subnet)
+				glog.V(2).Infof("Block %s already claimed by us.  Success", subnet)
 				return nil
 			}
 
@@ -145,7 +145,7 @@ func (rw blockReaderWriter) releaseBlockAffinity(host string, blockCidr net.IPNe
 					// Block already deleted.  Carry on.
 
 				} else {
-					log.Printf("Error deleting block: %s", err)
+					glog.V(2).Infof("Error deleting block: %s", err)
 					return err
 				}
 			}
@@ -191,22 +191,22 @@ func (rw blockReaderWriter) compareAndSwapBlock(b allocationBlock) error {
 
 	// Determine correct Set options.
 	if b.DbResult != "" {
-		log.Println("CAS update block:", b.Cidr)
+		glog.V(2).Infof("CAS update block:", b.Cidr)
 		opts = client.SetOptions{PrevExist: client.PrevExist, PrevValue: b.DbResult}
 	} else {
-		log.Println("CAS write new block:", b.Cidr)
+		glog.V(2).Infof("CAS write new block:", b.Cidr)
 		opts = client.SetOptions{PrevExist: client.PrevNoExist}
 	}
 
 	j, err := json.Marshal(b)
 	if err != nil {
-		log.Println("Error converting block to json:", err)
+		glog.V(2).Infof("Error converting block to json:", err)
 		return err
 	}
 	_, err = rw.etcd.Set(context.Background(), key, string(j), &opts)
 	if err != nil {
 		if eerr, ok := err.(client.Error); ok && eerr.Code == client.ErrorCodeNodeExist {
-			log.Println("CAS error writing block:", err)
+			glog.V(2).Infof("CAS error writing block:", err)
 			return CASError(fmt.Sprintf("Failed to write block %s", b.Cidr))
 		} else {
 			return err
@@ -228,7 +228,7 @@ func (rw blockReaderWriter) readBlock(blockCidr net.IPNet) (*allocationBlock, er
 	opts := client.GetOptions{Quorum: true}
 	resp, err := rw.etcd.Get(context.Background(), key, &opts)
 	if err != nil {
-		log.Println("Error reading IPAM block:", err)
+		glog.V(2).Infof("Error reading IPAM block:", err)
 		if client.IsKeyNotFound(err) {
 			return nil, noSuchBlockError{Cidr: blockCidr}
 		}
@@ -251,7 +251,7 @@ func (rw blockReaderWriter) readAllBlocks() ([]allocationBlock, []allocationBloc
 		key := fmt.Sprintf(ipamBlockPath, version.Number)
 		resp, err := rw.etcd.Get(context.Background(), key, &opts)
 		if err != nil {
-			log.Println("Error reading IPAM blocks:", err)
+			glog.V(2).Infof("Error reading IPAM blocks:", err)
 			return nil, nil, err
 		}
 
