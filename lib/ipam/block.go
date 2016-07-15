@@ -153,7 +153,7 @@ func (b *allocationBlock) release(addresses []net.IP) ([]net.IP, map[string]int,
 		// Check if allocated.
 		attrIdx := b.Allocations[ordinal]
 		if attrIdx == nil {
-			glog.V(2).Infof("Asked to release address that was not allocated")
+			glog.V(4).Infof("Asked to release address that was not allocated")
 			unallocated = append(unallocated, ip)
 			continue
 		}
@@ -207,9 +207,9 @@ func (b *allocationBlock) deleteAttributes(delIndexes, ordinals []int) {
 	y := 0 // Next free slot in the new attributes list.
 	for x := range b.Attributes {
 		if !intInSlice(x, delIndexes) {
-			glog.V(2).Infof("%d in %s", x, delIndexes)
 			// Attribute at x is not being deleted.  Build a mapping
 			// of old attribute index (x) to new attribute index (y).
+			glog.V(4).Infof("%d in %s", x, delIndexes)
 			newIndex := y
 			newIndexes[x] = &newIndex
 			y += 1
@@ -258,10 +258,10 @@ func (b allocationBlock) attributeIndexesByHandle(handleID string) []int {
 
 func (b *allocationBlock) releaseByHandle(handleID string) int {
 	attrIndexes := b.attributeIndexesByHandle(handleID)
-	glog.V(2).Infof("Attribute indexes to release:", attrIndexes)
+	glog.V(3).Infof("Attribute indexes to release: %s", attrIndexes)
 	if len(attrIndexes) == 0 {
 		// Nothing to release.
-		glog.V(2).Infof("No addresses assigned to handle", handleID)
+		glog.V(3).Infof("No addresses assigned to handle '%s'", handleID)
 		return 0
 	}
 
@@ -319,13 +319,13 @@ func (b *allocationBlock) findOrAddAttribute(handleID *string, attrs map[string]
 	attr := allocationAttribute{handleID, attrs}
 	for idx, existing := range b.Attributes {
 		if reflect.DeepEqual(attr, existing) {
-			glog.V(2).Infof("Attribute already exists")
+			glog.V(4).Infof("Attribute '%+v' already exists", attr)
 			return idx
 		}
 	}
 
 	// Does not exist - add it.
-	glog.V(2).Infof("New attribute: %+v", attr)
+	glog.V(2).Infof("New allocation attribute: %+v", attr)
 	attrIndex := len(b.Attributes)
 	b.Attributes = append(b.Attributes, attr)
 	return attrIndex

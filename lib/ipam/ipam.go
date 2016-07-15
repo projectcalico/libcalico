@@ -38,7 +38,7 @@ type IPAMClient struct {
 // Creates a new IPAMClient.
 func NewIPAMClient() (*IPAMClient, error) {
 	// Create the interface into etcd for blocks.
-	glog.V(2).Infof("Creating new IPAM client")
+	glog.V(1).Infof("Creating new IPAM client")
 	config := client.Config{
 		// TODO: Make this configurable.
 		Endpoints:               []string{"http://localhost:2379"},
@@ -47,7 +47,7 @@ func NewIPAMClient() (*IPAMClient, error) {
 	}
 	c, err := client.New(config)
 	if err != nil {
-		glog.V(2).Infof("Failed to configure etcd client")
+		glog.Errorf("Failed to configure etcd client")
 		return nil, err
 	}
 	api := client.NewKeysAPI(c)
@@ -105,22 +105,27 @@ type AutoAssignArgs struct {
 func (c IPAMClient) AutoAssign(args AutoAssignArgs) ([]net.IP, []net.IP, error) {
 	// Determine the hostname to use - prefer the provided hostname if
 	// non-nil, otherwise use the hostname reported by os.
-	glog.V(2).Infof("Auto-assign args: %+v", args)
-	glog.V(2).Infof("Auto-assign %d ipv4, %d ipv6 addrs", args.Num4, args.Num6)
 	hostname := decideHostname(args.Hostname)
-	glog.V(2).Infof("Assigning for host: %s", hostname)
+	glog.V(2).Infof("Auto-assign %d ipv4, %d ipv6 addrs for host '%s'", args.Num4, args.Num6, hostname)
 
-	// Assign IPv4 addresses.
-	v4list, err := c.autoAssign(args.Num4, args.HandleID, args.Attrs, args.IPv4Pool, ipv4, hostname)
-	if err != nil {
-		glog.V(2).Infof("Error assigning IPV4 addresses: %s", err)
-		return nil, nil, err
+	var v4list, v6list []net.IP
+	var err error
+
+	if args.Num4 != 0 {
+		// Assign IPv4 addresses.
+		v4list, err = c.autoAssign(args.Num4, args.HandleID, args.Attrs, args.IPv4Pool, ipv4, hostname)
+		if err != nil {
+			glog.Errorf("Error assigning IPV4 addresses: %s", err)
+			return nil, nil, err
+		}
 	}
 
-	// If no err assigning V4, try to assign any V6.
-	v6list, err := c.autoAssign(args.Num6, args.HandleID, args.Attrs, args.IPv6Pool, ipv6, hostname)
-	if err != nil {
-		return nil, nil, err
+	if args.Num6 != 0 {
+		// If no err assigning V4, try to assign any V6.
+		v6list, err = c.autoAssign(args.Num6, args.HandleID, args.Attrs, args.IPv6Pool, ipv6, hostname)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	return v4list, v6list, nil
@@ -131,12 +136,12 @@ func (c IPAMClient) autoAssign(num int, handleID *string, attrs map[string]strin
 	// Start by trying to assign from one of the host-affine blocks.  We
 	// always do strict checking at this stage, so it doesn't matter whether
 	// globally we have strict_affinity or not.
-	glog.V(2).Infof("Looking for addresses in current affine blocks for host '%s'", host)
+	glog.V(4).Infof("Looking for addresses in current affine blocks for host '%s'", host)
 	affBlocks, err := c.blockReaderWriter.getAffineBlocks(host, version, pool)
 	if err != nil {
 		return nil, err
 	}
-	glog.V(2).Infof("Found %d affine IPv%d blocks", len(affBlocks), version.Number)
+	glog.V(4).Infof("Found %d affine IPv%d blocks for host '%s': %v", len(affBlocks), version.Number, host, affBlocks)
 	ips := []net.IP{}
 	for len(ips) < num {
 		if len(affBlocks) == 0 {
@@ -146,7 +151,7 @@ func (c IPAMClient) autoAssign(num int, handleID *string, attrs map[string]strin
 		cidr := affBlocks[0]
 		affBlocks = affBlocks[1:]
 		ips, _ = c.assignFromExistingBlock(cidr, num, handleID, attrs, host, nil)
-		glog.V(2).Infof("Block provided addresses: %v", ips)
+		glog.V(3).Infof("Block '%s' provided addresses: %v", cidr.String(), ips)
 	}
 
 	// If there are still addresses to allocate, then we've run out of
@@ -159,22 +164,22 @@ func (c IPAMClient) autoAssign(num int, handleID *string, attrs map[string]strin
 	}
 	if config.AutoAllocateBlocks == true {
 		rem := num - len(ips)
-		glog.V(2).Infof("Need to allocate %d more addresses", rem)
 		retries := etcdRetries
 		for rem > 0 && retries > 0 {
 			// Claim a new block.
+			glog.V(2).Infof("Need to allocate %d more addresses - allocate another block", rem)
 			retries = retries - 1
 			b, err := c.blockReaderWriter.claimNewAffineBlock(host, version, pool, *config)
 			if err != nil {
 				// Error claiming new block.
-				glog.V(2).Infof("Error claiming new block: %s", err)
+				glog.Errorf("Error claiming new block: %s", err)
 				return nil, err
 			} else {
 				// Claim successful.  Assign addresses from the new block.
-				glog.V(2).Infof("Claimed new block - assigning addresses")
+				glog.V(2).Infof("Claimed new block %s - assigning %s addresses", b.String(), rem)
 				newIPs, err := c.assignFromExistingBlock(*b, rem, handleID, attrs, host, &config.StrictAffinity)
 				if err != nil {
-					glog.V(2).Infof("Error assigning IPs:", err)
+					glog.Warningf("Failed to assign IPs:", err)
 					break
 				}
 				ips = append(ips, newIPs...)
@@ -201,11 +206,13 @@ func (c IPAMClient) autoAssign(num int, handleID *string, attrs map[string]strin
 	// If we need to support non-strict affinity and no auto-allocation of
 	// blocks, then we should query the actual allocation blocks and assign
 	// from those.
-	if config.StrictAffinity != true {
-		glog.V(2).Infof("Attempting to assign from non-affine block")
+	rem := num - len(ips)
+	if config.StrictAffinity != true && rem != 0 {
+		glog.Warningf("Attempting to assign %d more addresses from non-affine blocks", rem)
 		// TODO: this
 	}
 
+	glog.V(1).Infof("Auto-assigned IPv%ds: %v", version.Number, ips)
 	return ips, nil
 }
 
@@ -241,7 +248,7 @@ func (c IPAMClient) AssignIP(args AssignIPArgs) error {
 	}
 
 	blockCidr := getBlockCIDRForAddress(args.IP)
-	glog.V(2).Infof("IP is in block '%s'", blockCidr.String())
+	glog.V(3).Infof("IP %s is in block '%s'", args.IP.String(), blockCidr.String())
 	for i := 0; i < etcdRetries; i++ {
 		block, err := c.blockReaderWriter.readBlock(blockCidr)
 		if err != nil {
@@ -252,12 +259,12 @@ func (c IPAMClient) AssignIP(args AssignIPArgs) error {
 					estr := fmt.Sprintf("The given IP address (%s) is no in any configured pools", args.IP.String())
 					return errors.New(estr)
 				}
-				glog.V(2).Infof("Block for IP %s does not yet exist, creating", args.IP)
+				glog.V(3).Infof("Block for IP %s does not yet exist, creating", args.IP)
 				cfg := IPAMConfig{StrictAffinity: false, AutoAllocateBlocks: true}
 				err := c.blockReaderWriter.claimBlockAffinity(blockCidr, hostname, cfg)
 				if err != nil {
 					if _, ok := err.(*AffinityClaimedError); ok {
-						glog.V(2).Infof("Someone else claimed block %s before us", blockCidr)
+						glog.Warningf("Someone else claimed block %s before us", blockCidr)
 						continue
 					} else {
 						return err
@@ -270,10 +277,9 @@ func (c IPAMClient) AssignIP(args AssignIPArgs) error {
 				return err
 			}
 		}
-		glog.V(2).Infof("IP %s is in block %s", args.IP, block.Cidr)
 		err = block.assign(args.IP, args.HandleID, args.Attrs, hostname)
 		if err != nil {
-			glog.V(2).Infof("Failed to assign address %s: %s", args.IP, err)
+			glog.Errorf("Failed to assign address %s: %s", args.IP, err)
 			return err
 		}
 
@@ -285,7 +291,7 @@ func (c IPAMClient) AssignIP(args AssignIPArgs) error {
 		// Update the block.
 		err = c.blockReaderWriter.compareAndSwapBlock(*block)
 		if err != nil {
-			glog.V(2).Infof("CAS failed on block %s", block.Cidr)
+			glog.Warningf("CAS failed on block %s", block.Cidr)
 			if args.HandleID != nil {
 				c.decrementHandle(*args.HandleID, blockCidr, 1)
 			}
@@ -299,14 +305,14 @@ func (c IPAMClient) AssignIP(args AssignIPArgs) error {
 // ReleaseIPs releases any of the given IP addresses that are currently assigned,
 // so that they are available to be used in another assignment.
 func (c IPAMClient) ReleaseIPs(ips []net.IP) ([]net.IP, error) {
-	glog.V(2).Infof("Releasing IP addresses:", ips)
+	glog.V(2).Infof("Releasing IP addresses: %v", ips)
 	unallocated := []net.IP{}
 	for _, ip := range ips {
 		blockCidr := getBlockCIDRForAddress(ip)
 		// TODO: Group IP addresses per-block to minimize writes to etcd.
 		unalloc, err := c.releaseIPsFromBlock([]net.IP{ip}, blockCidr)
 		if err != nil {
-			glog.V(2).Infof("Error releasing IPs:", err)
+			glog.Errorf("Error releasing IPs: %s", err)
 			return nil, err
 		}
 		unallocated = append(unallocated, unalloc...)
@@ -342,20 +348,20 @@ func (c IPAMClient) releaseIPsFromBlock(ips []net.IP, blockCidr net.IPNet) ([]ne
 		// Otherwise, update the block using CAS.
 		var casError error
 		if b.empty() && b.HostAffinity == nil {
-			glog.V(2).Infof("Deleting non-affine block")
+			glog.V(3).Infof("Deleting non-affine block '%s'", b.Cidr.String())
 			casError = c.blockReaderWriter.deleteBlock(*b)
 		} else {
-			glog.V(2).Infof("Updating assignments in block")
+			glog.V(3).Infof("Updating assignments in block '%s'", b.Cidr.String())
 			casError = c.blockReaderWriter.compareAndSwapBlock(*b)
 		}
 
 		if casError != nil {
-			glog.V(2).Infof("Error updating block - retry #%d", i)
+			glog.Warningf("Failed to update block '%s' - retry #%d", b.Cidr.String(), i)
 			continue
 		}
 
 		// Success - decrement handles.
-		glog.V(2).Infof("Decrementing handles:", handles)
+		glog.V(3).Infof("Decrementing handles: %v", handles)
 		for handleID, amount := range handles {
 			c.decrementHandle(handleID, blockCidr, amount)
 		}
@@ -369,15 +375,15 @@ func (c IPAMClient) assignFromExistingBlock(
 	// Limit number of retries.
 	var ips []net.IP
 	for i := 0; i < etcdRetries; i++ {
-		glog.V(2).Infof("Auto-assign from %s - retry %d", blockCidr.String(), i)
+		glog.V(4).Infof("Auto-assign from %s - retry %d", blockCidr.String(), i)
 		b, err := c.blockReaderWriter.readBlock(blockCidr)
 		if err != nil {
 			return nil, err
 		}
-		glog.V(2).Infof("Got block: %v", b)
+		glog.V(4).Infof("Got block: %v", b)
 		ips, err = b.autoAssign(num, handleID, host, attrs, true)
 		if err != nil {
-			glog.V(2).Infof("Error in auto assign:", err)
+			glog.Errorf("Error in auto assign: %s", err)
 			return nil, err
 		}
 		if len(ips) == 0 {
@@ -393,7 +399,7 @@ func (c IPAMClient) assignFromExistingBlock(
 		// Update the block using CAS.
 		err = c.blockReaderWriter.compareAndSwapBlock(*b)
 		if err != nil {
-			glog.V(2).Infof("Error updating block - try again")
+			glog.V(2).Infof("Failed to update block '%s' - try again", b.Cidr.String())
 			if handleID != nil {
 				c.decrementHandle(*handleID, blockCidr, num)
 			}
@@ -438,7 +444,6 @@ func (c IPAMClient) ClaimAffinity(cidr net.IPNet, host *string) error {
 			// 1) claimed by another host.
 			return err
 		}
-		glog.V(2).Infof("Claimed: ", blockCidr)
 	}
 	return nil
 
@@ -500,6 +505,7 @@ func (c IPAMClient) ReleaseHostAffinities(host *string) error {
 // ReleasePoolAffinities releases affinity for all blocks within
 // the specified pool across all hosts.
 func (c IPAMClient) ReleasePoolAffinities(pool net.IPNet) error {
+	glog.V(2).Infof("Releasing block affinities within pool '%s'", pool.String())
 	for i := 0; i < keyErrRetries; i++ {
 		retry := false
 		pairs, err := c.hostBlockPairs(pool)
@@ -508,7 +514,7 @@ func (c IPAMClient) ReleasePoolAffinities(pool net.IPNet) error {
 		}
 
 		if len(pairs) == 0 {
-			glog.V(2).Infof("No blocks have affinity")
+			glog.V(4).Infof("No blocks have affinity")
 			return nil
 		}
 
@@ -516,12 +522,13 @@ func (c IPAMClient) ReleasePoolAffinities(pool net.IPNet) error {
 			_, blockCidr, _ := net.ParseCIDR(blockString)
 			err = c.blockReaderWriter.releaseBlockAffinity(host, *blockCidr)
 			if err != nil {
-				glog.V(2).Infof("Error: %s", err)
 				if _, ok := err.(AffinityClaimedError); ok {
 					retry = true
 				} else if _, ok := err.(noSuchBlockError); ok {
+					glog.V(4).Infof("No such block '%s'", blockCidr.String())
 					continue
 				} else {
+					glog.Errorf("Error releasing affinity for '%s': %s", blockCidr.String(), err)
 					return err
 				}
 			}
@@ -609,7 +616,7 @@ func (c IPAMClient) IpsByHandle(handleID string) ([]net.IP, error) {
 		_, blockCidr, _ := net.ParseCIDR(k)
 		b, err := c.blockReaderWriter.readBlock(*blockCidr)
 		if err != nil {
-			glog.V(2).Infof("Couldn't read block %s referenced by handle %s", blockCidr, handleID)
+			glog.Warningf("Couldn't read block %s referenced by handle %s", blockCidr, handleID)
 			continue
 		}
 		assignments = append(assignments, b.ipsByHandle(handleID)...)
@@ -666,7 +673,7 @@ func (c IPAMClient) releaseByHandle(handleID string, blockCidr net.IPNet) error 
 			err = c.blockReaderWriter.compareAndSwapBlock(*block)
 			if err != nil {
 				// Failed to update - retry.
-				glog.V(2).Infof("CAS error for block, retry #%d: %s", i, err)
+				glog.Warningf("CAS error for block, retry #%d: %s", i, err)
 				continue
 			}
 		}
@@ -682,7 +689,7 @@ func (c IPAMClient) readHandle(handleID string) (*allocationHandle, error) {
 	opts := client.GetOptions{Quorum: true}
 	resp, err := c.blockReaderWriter.etcd.Get(context.Background(), key, &opts)
 	if err != nil {
-		glog.V(2).Infof("Error reading IPAM handle:", err)
+		glog.Errorf("Error reading IPAM handle:", err)
 		return nil, err
 	}
 	h := allocationHandle{}
@@ -751,27 +758,27 @@ func (c IPAMClient) compareAndSwapHandle(h allocationHandle) error {
 	if h.DbResult != "" {
 		if h.empty() {
 			// The handle is empty - delete it instead of an update.
-			glog.V(2).Infof("CAS delete handle:", h.HandleID)
+			glog.V(3).Infof("CAS delete handle: %s", h.HandleID)
 			deleteOpts := client.DeleteOptions{PrevValue: h.DbResult}
 			_, err := c.blockReaderWriter.etcd.Delete(context.Background(),
 				key, &deleteOpts)
 			return err
 		}
-		glog.V(2).Infof("CAS update handle:", h.HandleID)
+		glog.V(3).Infof("CAS update handle: %s", h.HandleID)
 		opts = client.SetOptions{PrevExist: client.PrevExist, PrevValue: h.DbResult}
 	} else {
-		glog.V(2).Infof("CAS write new handle:", h.HandleID)
+		glog.V(3).Infof("CAS write new handle: %s", h.HandleID)
 		opts = client.SetOptions{PrevExist: client.PrevNoExist}
 	}
 
 	j, err := json.Marshal(h)
 	if err != nil {
-		glog.V(2).Infof("Error converting handle to json:", err)
+		glog.Errorf("Error converting handle to json: %s", err)
 		return err
 	}
 	_, err = c.blockReaderWriter.etcd.Set(context.Background(), key, string(j), &opts)
 	if err != nil {
-		glog.V(2).Infof("CAS error writing json:", err)
+		glog.Errorf("CAS error writing json: %s", err)
 		return err
 	}
 
@@ -784,7 +791,7 @@ func (c IPAMClient) GetAssignmentAttributes(addr net.IP) (map[string]string, err
 	blockCidr := getBlockCIDRForAddress(addr)
 	block, err := c.blockReaderWriter.readBlock(blockCidr)
 	if err != nil {
-		glog.V(2).Infof("Error reading block %s: %s", blockCidr, err)
+		glog.Errorf("Error reading block %s: %s", blockCidr, err)
 		return nil, errors.New(fmt.Sprintf("%s is not assigned", addr))
 	}
 	return block.attributesForIP(addr)
@@ -804,7 +811,7 @@ func (c IPAMClient) GetIPAMConfig() (*IPAMConfig, error) {
 			}
 			return &cfg, nil
 		} else {
-			glog.V(2).Infof("Error reading IPAM config:", err)
+			glog.Errorf("Error reading IPAM config:", err)
 			return nil, err
 		}
 	}
@@ -831,14 +838,13 @@ func (c IPAMClient) SetIPAMConfig(cfg IPAMConfig) error {
 
 	v4Blocks, v6Blocks, err := c.blockReaderWriter.readAllBlocks()
 	if len(v4Blocks) != 0 && len(v6Blocks) != 0 {
-		glog.V(2).Infof("V4: %s, V6: %s", v4Blocks, v6Blocks)
 		return errors.New("Cannot change IPAM config while allocations exist")
 	}
 
 	// Write to etcd.
 	j, err := json.Marshal(c)
 	if err != nil {
-		glog.V(2).Infof("Error converting IPAM config to json:", err)
+		glog.Errorf("Error converting IPAM config to json:", err)
 		return err
 	}
 	_, err = c.blockReaderWriter.etcd.Set(context.Background(), ipamConfigPath, string(j), nil)
