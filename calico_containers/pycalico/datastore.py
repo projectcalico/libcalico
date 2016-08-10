@@ -879,8 +879,7 @@ class DatastoreClient(object):
         policy_path = POLICY_PATH % {"tier_name": tier_name,
                                      "policy_name": policy_name}
         default_allow = Rule(action="allow")
-        rules = rules or Rules(id=policy_name,
-                               inbound_rules=[default_allow],
+        rules = rules or Rules(inbound_rules=[default_allow],
                                outbound_rules=[default_allow])
         order = order or 100
 
@@ -974,8 +973,7 @@ class DatastoreClient(object):
         # be accepted by another profile on the endpoint.
         accept_self = Rule(action="allow", src_tag=name)
         default_allow = Rule(action="allow")
-        rules = rules or Rules(id=name,
-                               inbound_rules=[accept_self],
+        rules = rules or Rules(inbound_rules=[accept_self],
                                outbound_rules=[default_allow])
         self.etcd_client.write(profile_path + "rules", rules.to_json())
 
