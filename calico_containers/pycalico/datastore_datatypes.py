@@ -35,7 +35,7 @@ cali123456789ab.
 """
 
 
-class Rules(namedtuple("Rules", ["id", "inbound_rules", "outbound_rules"])):
+class Rules(namedtuple("Rules", ["inbound_rules", "outbound_rules"])):
     """
     A set of Calico rules describing inbound and outbound network traffic
     policy.
@@ -79,8 +79,7 @@ class Rules(namedtuple("Rules", ["id", "inbound_rules", "outbound_rules"])):
         outbound_rules = []
         for rule in json_dict["outbound_rules"]:
             outbound_rules.append(Rule(**rule))
-        rules = cls(id=json_dict["id"],
-                    inbound_rules=inbound_rules,
+        rules = cls(inbound_rules=inbound_rules,
                     outbound_rules=outbound_rules)
         return rules
 
@@ -389,7 +388,7 @@ class Profile(object):
         self.tags = set()
 
         # Default to empty lists of rules.
-        self.rules = Rules(name, [], [])
+        self.rules = Rules([], [])
 
 
 class Policy(object):
@@ -400,7 +399,7 @@ class Policy(object):
         self.order = 0
 
         # Default to empty lists of rules.
-        self.rules = Rules(policy_name, [], [])
+        self.rules = Rules([], [])
 
         # Default to empty selector.
         self.selector = ""

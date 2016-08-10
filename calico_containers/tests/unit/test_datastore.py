@@ -106,10 +106,9 @@ ETCD_ENV_DICT_ENDPOINTS = {
 }
 
 # A complicated set of Rules JSON for testing serialization / deserialization.
-RULES_JSON = """
+RULES_JSON_FMT = """
 {
-  "id": "PROF_GROUP1",
-  "inbound_rules": [
+  %s"inbound_rules": [
     {
       "action": "allow",
       "src_tag": "PROF_GROUP1"
@@ -140,6 +139,14 @@ RULES_JSON = """
     }
   ]
 }"""
+
+# A complicated set of rules adhering to the correct etcd data model
+RULES_JSON = RULES_JSON_FMT % ""
+
+# An identical set of rules which includes an additional "id" field that was
+# added by older versions of libcalico.  We test that we can still read profiles
+# of older versions.
+RULES_JSON_WITH_ID = RULES_JSON_FMT % '      "id": "PROFILE1",\n'
 
 
 class TestRule(unittest.TestCase):
@@ -256,12 +263,26 @@ class TestRules(unittest.TestCase):
         # Convert a JSON blob into a Rules object.
         rules = Rules.from_json(RULES_JSON)
 
+        # Call common check code.
+        self.check_rules(rules)
+
+    def test_rules_with_id(self):
+        """
+        Create a detailed set of rules that include an id field.  This was included
+        in older versions of libcalico.  We check here that we can read it in ok.
+        """
+        # Convert a JSON blob into a Rules object.
+        rules = Rules.from_json(RULES_JSON_WITH_ID)
+
+        # Call common check code.
+        self.check_rules(rules)
+
+    def check_rules(self, rules):
         # Convert the Rules object to JSON and then back again.
         new_json = rules.to_json()
         new_rules = Rules.from_json(new_json)
 
         # Compare the two rules objects.
-        assert_equal(rules.id, new_rules.id)
         assert_equal(rules.inbound_rules,
                      new_rules.inbound_rules)
         assert_equal(rules.outbound_rules,
@@ -723,8 +744,7 @@ class TestDatastoreClient(unittest.TestCase):
 
         profile = Profile("TEST")
         profile.tags = {"TAG4", "TAG5"}
-        profile.rules = Rules(id="TEST",
-                              inbound_rules=[
+        profile.rules = Rules(inbound_rules=[
                                   Rule(action="allow", dst_ports=[12]),
                                   Rule(action="allow", protocol="udp"),
                                   Rule(action="deny")
@@ -747,8 +767,7 @@ class TestDatastoreClient(unittest.TestCase):
 
         profile = Profile("TEST")
         profile.tags = {"TAG4", "TAG5"}
-        profile.rules = Rules(id="TEST",
-                              inbound_rules=[
+        profile.rules = Rules(inbound_rules=[
                                   Rule(action="allow", dst_ports=[12]),
                                   Rule(action="allow", protocol="udp"),
                                   Rule(action="deny")
@@ -1165,8 +1184,7 @@ class TestDatastoreClient(unittest.TestCase):
         Test create_profile()
         """
         self.datastore.create_profile("TEST")
-        rules = Rules(id="TEST",
-                      inbound_rules=[Rule(action="allow",
+        rules = Rules(inbound_rules=[Rule(action="allow",
                                           src_tag="TEST")],
                       outbound_rules=[Rule(action="allow")])
         expected_calls = [call(TEST_PROFILE_PATH + "tags", '["TEST"]'),
@@ -1177,8 +1195,7 @@ class TestDatastoreClient(unittest.TestCase):
         """
         Test create_profile() with rules specified
         """
-        rules = Rules(id="TEST",
-                      inbound_rules=[Rule(action="deny")],
+        rules = Rules(inbound_rules=[Rule(action="deny")],
                       outbound_rules=[Rule(action="allow")])
         self.datastore.create_profile("TEST", rules)
         expected_calls = [call(TEST_PROFILE_PATH + "tags", '["TEST"]'),
