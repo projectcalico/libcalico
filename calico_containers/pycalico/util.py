@@ -676,3 +676,27 @@ def verify_ports(port_list):
                 raise RangeValidationError("Port is invalid. Value must be "
                                            "from 0 to 65535 ('{0}' given)."
                                            "".format(port))
+
+def get_ipv6_link_local(interface_name):
+    """
+    Runs IP routing commands to extract the currently assigned IPv6 link-local
+    address for an interface in this namespace.
+
+    :param interface_name: Name of the target interface.
+    :return: A string represention of the link local address, or None (if one isn't assigned).
+    Will throw exception if not interface information exists for that name.
+    """
+    # Get networking info for interface_name
+    try:
+        ip_addr_output = check_output(["ip", "-6", "addr", "show", "dev", interface_name])
+    except CalledProcessError as e:
+        _log.debug("Failed to get IPv6 address for veth %s. Error: %s",
+                interface_name, e)
+        return None
+    else:
+        # Search output for the assigned ipv6 addr
+        try:
+            return re.search(IPV6_RE, ip_addr_output).group(1)
+        except AttributeError:
+            _log.warning("No nexthop found for interface %s", interface_name)
+            return None
