@@ -359,6 +359,7 @@ class Endpoint(object):
                 self.mac == other.mac and
                 self.profile_ids == other.profile_ids and
                 self.ipv4_nets == other.ipv4_nets and
+                self.name == other.name and
                 self.ipv6_nets == other.ipv6_nets)
 
     def __ne__(self, other):
