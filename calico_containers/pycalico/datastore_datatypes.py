@@ -230,14 +230,15 @@ class Endpoint(object):
                                 "endpoint/(?P<endpoint_id>[^/]*)")
 
     def __init__(self, hostname, orchestrator_id, workload_id, endpoint_id,
-                 state, mac):
+                 state, mac, name=None):
         self.hostname = hostname
         self.orchestrator_id = orchestrator_id
         self.workload_id = workload_id
         self.endpoint_id = endpoint_id
         self.state = state
         self.mac = mac
-        self.name = generate_cali_interface_name(IF_PREFIX, endpoint_id)
+        self.name = name or generate_cali_interface_name(IF_PREFIX,
+                                                         endpoint_id)
 
         self.ipv4_nets = set()
         self.ipv6_nets = set()
@@ -278,7 +279,7 @@ class Endpoint(object):
 
         json_dict = json.loads(json_str)
         ep = cls(hostname, orchestrator_id, workload_id, endpoint_id,
-                 json_dict["state"], json_dict["mac"])
+                 json_dict["state"], json_dict["mac"], name=json_dict["name"])
 
         for net in json_dict["ipv4_nets"]:
             ep.ipv4_nets.add(IPNetwork(net))
@@ -358,6 +359,7 @@ class Endpoint(object):
                 self.mac == other.mac and
                 self.profile_ids == other.profile_ids and
                 self.ipv4_nets == other.ipv4_nets and
+                self.name == other.name and
                 self.ipv6_nets == other.ipv6_nets)
 
     def __ne__(self, other):
