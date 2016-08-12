@@ -11,7 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-FROM python:2.7.12
+
+# The wheezy build container is used to build calicoctl with older versions
+# of glibc (2.13).
+FROM python:2.7.12-wheezy
 MAINTAINER Tom Denham <tom@projectcalico.org>
 
 WORKDIR /code/

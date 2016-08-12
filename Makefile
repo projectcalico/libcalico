@@ -21,7 +21,8 @@ update-frozen:
 	docker run --rm calico/build pip freeze | grep -v pycalico > build-requirements-frozen.txt
 
 calicobuild.created: $(BUILD_FILES) $(PYCALICO)
-	docker build -t calico/build .
+	docker build -t calico/build:latest .
+	docker build -f Dockerfile.build_wheezy -t calico/build:latest-wheezy .
 	touch calicobuild.created
 
 dist/pycalico-$(WHEEL_VERSION)-py2-none-any.whl: $(PYCALICO)
