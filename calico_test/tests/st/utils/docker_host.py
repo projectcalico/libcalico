@@ -13,6 +13,7 @@
 # limitations under the License.
 import logging
 import os
+import uuid
 from subprocess import CalledProcessError
 from functools import partial
 
@@ -32,12 +33,16 @@ class DockerHost(object):
     :param calico_node_autodetect_ip: When set to True, the test framework
     will not perform IP detection, and will run `calicoctl node` without explicitly
     passing in a value for --ip. This means calico-node will be forced to do its IP detection.
+    :param override_hostname: When set to True, the test framework will choose an alternate
+    hostname for the host which it will pass to all calicoctl components as the HOSTNAME
+    environment variable.  If set to False, the HOSTNAME environment is not explicitly set.
     """
     def __init__(self, name, start_calico=True, dind=True,
                  additional_docker_options="",
                  post_docker_commands=["docker load -i /code/calico-node.tar",
                                        "docker load -i /code/busybox.tar"],
-                 calico_node_autodetect_ip=False):
+                 calico_node_autodetect_ip=False,
+                 override_hostname=False):
         self.name = name
         self.dind = dind
         self.workloads = set()
@@ -50,6 +55,11 @@ class DockerHost(object):
         self.ip6 = None
         """
         An IPv6 address value to pass to calicoctl as `--ipv6`. If left as None, no value will be passed.
+        """
+
+        self._hostname = None if not override_hostname else uuid.uuid1().hex[:16]
+        """
+        Create an arbitrary hostname if we want to override.
         """
 
         # This variable is used to assert on destruction that this object was
@@ -141,6 +151,10 @@ class DockerHost(object):
                     "export ETCD_KEY_FILE=%s; %s" % \
                     (etcd_auth, ETCD_SCHEME, ETCD_CA, ETCD_CERT, ETCD_KEY,
                      calicoctl)
+        # If the hostname is being overriden, then export the HOSTNAME environment.
+        if self._hostname:
+            calicoctl = "export HOSTNAME=%s; %s" % (self._hostname, calicoctl)
+
         return self.execute(calicoctl + " " + command)
 
     def start_calico_node(self, options=""):
@@ -178,14 +192,23 @@ class DockerHost(object):
             etcd_auth = "%s:2379" % get_ip()
             ssl_args = ""
 
+        # If the hostname has been overridden on this host, then pass it in
+        # as an environment variable.
+        if self._hostname:
+            hostname_args = "-e HOSTNAME=%s" % self._hostname
+        else:
+            hostname_args = ""
+
         self.execute("docker run -d --net=host --privileged "
                      "--name=calico-node "
-                     "-e IP=%s -e ETCD_AUTHORITY=%s "
-                     "-e ETCD_SCHEME=%s %s "
+                     "%s "
+                     "-e IP=%s "
+                     "-e ETCD_AUTHORITY=%s -e ETCD_SCHEME=%s %s "
                      "-v /var/log/calico:/var/log/calico "
                      "-v /var/run/calico:/var/run/calico "
-                     "calico/node:latest" % (self.ip, etcd_auth,
-                                             ETCD_SCHEME, ssl_args))
+                     "calico/node:latest" % (hostname_args,
+                                             self.ip,
+                                             etcd_auth, ETCD_SCHEME, ssl_args))
 
 
     def remove_workloads(self):
@@ -334,5 +357,9 @@ class DockerHost(object):
         :param host: DockerHost object
         :return: hostname of DockerHost
         """
+        # If overriding the hostname, return that one.
+        if self._hostname:
+            return self._hostname
+
         command = "docker inspect --format {{.Config.Hostname}} %s" % self.name
         return log_and_run(command)
