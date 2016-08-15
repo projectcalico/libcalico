@@ -57,7 +57,7 @@ class DockerHost(object):
         An IPv6 address value to pass to calicoctl as `--ipv6`. If left as None, no value will be passed.
         """
 
-        self._hostname = None if not override_hostname else uuid.uuid1().hex[:16]
+        self.override_hostname = None if not override_hostname else uuid.uuid1().hex[:16]
         """
         Create an arbitrary hostname if we want to override.
         """
@@ -152,8 +152,8 @@ class DockerHost(object):
                     (etcd_auth, ETCD_SCHEME, ETCD_CA, ETCD_CERT, ETCD_KEY,
                      calicoctl)
         # If the hostname is being overriden, then export the HOSTNAME environment.
-        if self._hostname:
-            calicoctl = "export HOSTNAME=%s; %s" % (self._hostname, calicoctl)
+        if self.override_hostname:
+            calicoctl = "export HOSTNAME=%s; %s" % (self.override_hostname, calicoctl)
 
         return self.execute(calicoctl + " " + command)
 
@@ -194,8 +194,8 @@ class DockerHost(object):
 
         # If the hostname has been overridden on this host, then pass it in
         # as an environment variable.
-        if self._hostname:
-            hostname_args = "-e HOSTNAME=%s" % self._hostname
+        if self.override_hostname:
+            hostname_args = "-e HOSTNAME=%s" % self.override_hostname
         else:
             hostname_args = ""
 
@@ -358,8 +358,8 @@ class DockerHost(object):
         :return: hostname of DockerHost
         """
         # If overriding the hostname, return that one.
-        if self._hostname:
-            return self._hostname
+        if self.override_hostname:
+            return self.override_hostname
 
         command = "docker inspect --format {{.Config.Hostname}} %s" % self.name
         return log_and_run(command)
