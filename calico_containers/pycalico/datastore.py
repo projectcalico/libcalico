@@ -41,6 +41,7 @@ ETCD_CA_CERT_FILE_ENV = "ETCD_CA_CERT_FILE"
 # etcd paths for Calico workloads, endpoints and IPAM.
 CALICO_V_PATH = "/calico/v1"
 CONFIG_PATH = CALICO_V_PATH + "/config/"
+CLUSTER_GUID_PATH = CONFIG_PATH + "ClusterGUID"
 CONFIG_IF_PREF_PATH = CONFIG_PATH + "InterfacePrefix"
 HOSTS_PATH = CALICO_V_PATH + "/host/"
 HOST_PATH = HOSTS_PATH + "%(hostname)s/"
@@ -291,8 +292,28 @@ class DatastoreClient(object):
         # Disable felix status reporting, which consumes etcd write bandwidth.
         self._write_global_config(FELIX_REPORTING_INTERVAL_PATH, "0")
 
+        # Create our Cluster GUID (if it does not already exist).
+        self._ensure_cluster_guid(CLUSTER_GUID_PATH)
+
         # We are always ready.
         self.etcd_client.write(CALICO_V_PATH + "/Ready", "true")
+
+    def _ensure_cluster_guid(self, key):
+        """
+        Ensures a globally unique cluster GUID.  Write it idempotently into the
+        datastore. The prevExist=False creates the value (safely with CaS)
+        if it doesn't exist.
+        """
+        try:
+            self.etcd_client.read(key)
+        except EtcdKeyNotFound:
+            guid = uuid.uuid4()
+            guid_string = guid.get_hex()
+            try:
+                self.etcd_client.write(key, guid_string, prevExist=False)
+            except EtcdAlreadyExist:
+                # ignore
+                pass
 
     def _write_global_config(self, key, value):
         """
