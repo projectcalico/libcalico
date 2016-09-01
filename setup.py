@@ -59,6 +59,6 @@ setup(
     # https://packaging.python.org/en/latest/requirements.html
     install_requires=['netaddr', 'python-etcd>=0.4.3', 'subprocess32'],
     dependency_links=[
-        "https://github.com/jplana/python-etcd.git@0d0145f5e835aa032c97a0a5e09c4c68b7a03f66"
+        "git+https://github.com/jplana/python-etcd.git@0d0145f5e835aa032c97a0a5e09c4c68b7a03f66#egg=python-etcd-0.4.3"
     ]
 )
