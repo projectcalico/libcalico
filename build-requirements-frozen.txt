@@ -5,6 +5,7 @@ docopt==0.6.2
 netaddr==0.7.18
 prettytable==0.7.2
 PyInstaller==3.1.1
+# Pin python-etcd to commit that includes SSLv3 fix. Do not regenerate this file until after next python-etcd release. 
 git+https://github.com/jplana/python-etcd.git@0d0145f5e835aa032c97a0a5e09c4c68b7a03f66
 prometheus_client==0.0.13
 PyYAML==3.11
