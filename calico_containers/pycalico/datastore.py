@@ -25,7 +25,8 @@ from pycalico.datastore_datatypes import Rules, BGPPeer, IPPool, \
     Endpoint, Profile, Rule, IF_PREFIX, IPAMConfig, Policy
 from pycalico.datastore_errors import DataStoreError, \
     ProfileNotInEndpoint, ProfileAlreadyInEndpoint, MultipleEndpointsMatch
-from pycalico.util import get_hostname, validate_hostname_port
+from pycalico.util import get_hostname, validate_hostname_port, \
+    generate_cali_interface_name
 
 ETCD_AUTHORITY_DEFAULT = "127.0.0.1:2379"
 ETCD_AUTHORITY_ENV = "ETCD_AUTHORITY"
@@ -1307,12 +1308,22 @@ class DatastoreClient(object):
         :param mac: The mac address that the endpoint belongs to
         :return: An Endpoint Object
         """
+        ep_id = uuid.uuid1().hex
+
+        try:
+            if_prefix = self.etcd_client.read(CONFIG_IF_PREF_PATH).value
+        except EtcdKeyNotFound:
+            ep_name = None
+        else:
+            ep_name = generate_cali_interface_name(if_prefix, ep_id)
+
         ep = Endpoint(hostname=hostname,
                       orchestrator_id=orchestrator_id,
                       workload_id=workload_id,
-                      endpoint_id=uuid.uuid1().hex,
+                      endpoint_id=ep_id,
                       state="active",
-                      mac=mac)
+                      mac=mac,
+                      name=ep_name)
 
         for ip in ip_list:
             network = IPNetwork(ip)
