@@ -93,7 +93,7 @@ LOG_FILE_PATH_PATH = CONFIG_PATH + "LogFilePath"
 FELIX_REPORTING_INTERVAL_PATH = CONFIG_PATH + "ReportingIntervalSecs"
 
 # The default node AS number.
-DEFAULT_AS_NUM = 64511
+DEFAULT_AS_NUM = 64512
 
 # The default node mesh configuration.
 DEFAULT_NODE_MESH = {"enabled": True}

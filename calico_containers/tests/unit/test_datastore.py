@@ -590,7 +590,7 @@ class TestDatastoreClient(unittest.TestCase):
                            call(IPV4_POOLS_PATH, None, dir=True),
                            call(IPAM_V6_PATH, None, dir=True),
                            call(IPV6_POOLS_PATH, None, dir=True),
-                           call(BGP_NODE_DEF_AS_PATH, "64511"),
+                           call(BGP_NODE_DEF_AS_PATH, "64512"),
                            call(BGP_NODE_MESH_PATH, json.dumps({"enabled": True})),
                            call(log_file_path, "none"),
                            call(log_screen_path, "info"),
@@ -631,7 +631,7 @@ class TestDatastoreClient(unittest.TestCase):
                            call(IPV4_POOLS_PATH, None, dir=True),
                            call(IPAM_V6_PATH, None, dir=True),
                            call(IPV6_POOLS_PATH, None, dir=True),
-                           call(BGP_NODE_DEF_AS_PATH, "64511"),
+                           call(BGP_NODE_DEF_AS_PATH, "64512"),
                            call(BGP_NODE_MESH_PATH, json.dumps({"enabled": True})),
                            call(log_file_path, "none"),
                            call(log_screen_path, "info"),
@@ -1700,7 +1700,7 @@ class TestDatastoreClient(unittest.TestCase):
         :return: None.
         """
         self.etcd_client.read.side_effect = EtcdKeyNotFound()
-        assert_equal(self.datastore.get_default_node_as(), "64511")
+        assert_equal(self.datastore.get_default_node_as(), "64512")
 
     def test_get_hosts_data(self):
         """
