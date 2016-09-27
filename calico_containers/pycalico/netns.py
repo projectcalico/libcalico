@@ -21,7 +21,7 @@ import uuid
 import re
 from copy import copy
 
-from subprocess32 import check_output, check_call, CalledProcessError, STDOUT
+from subprocess32 import check_output, check_call, CalledProcessError
 from netaddr import IPAddress
 
 from util import get_ipv6_link_local
@@ -41,7 +41,7 @@ MAX_METRIC = 0xFFFFFFFF
 
 def increment_metrics(namespace):
     """
-    If any default route has a metric of 0, increase the metric of 
+    If any default route has a metric of 0, increase the metric of
     all default routes by 1, so long as it can be done without breaking
     uniqueness or surpassing the max metric value.
     :param namespace: The Networking namespace of the container.
@@ -342,7 +342,13 @@ class NamedNamespace(object):
         """
         command = self._get_nets_command(command)
         _log.debug("Run command: %s", command)
-        return check_output(command, timeout=IP_CMD_TIMEOUT, stderr=STDOUT)
+        # Note: we must not capture the stderr here (as with
+        # stderr=STDOUT), because otherwise successful 'ip netns exec <ns>
+        # <command> ...' call will write error messages to stderr if there are
+        # any bogus namespaces on the system.  See
+        # https://github.com/projectcalico/libcalico/issues/148 for detailed
+        # discussion.
+        return check_output(command, timeout=IP_CMD_TIMEOUT)
 
     def _get_nets_command(self, command):
         """
