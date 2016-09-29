@@ -79,6 +79,9 @@ BGP_HOST_IPV6_PATH = BGP_HOST_PATH + "ip_addr_v6"
 BGP_HOST_AS_PATH = BGP_HOST_PATH + "as_num"
 BGP_HOST_PEERS_PATH = BGP_HOST_PATH + "peer_v%(version)s/"
 BGP_HOST_PEER_PATH = BGP_HOST_PATH + "peer_v%(version)s/%(peer_ip)s"
+BGP_CUSTOM_FILTERS_PATH = BGP_GLOBAL_PATH + "custom_filters/"
+BGP_CUSTOM_FILTERS_IPV4_PATH = BGP_CUSTOM_FILTERS_PATH + "v4/"
+BGP_CUSTOM_FILTERS_IPV6_PATH = BGP_CUSTOM_FILTERS_PATH + "v6/"
 
 # Grabs hostname from etcd datastore keys
 HOSTNAME_IP_DATASTORE_RE = re.compile(BGP_HOSTS_PATH + "(.*)/ip_addr_v[46]")
@@ -272,6 +275,10 @@ class DatastoreClient(object):
             pool_path = IP_POOLS_PATH % {"version": version}
             self._write_global_dir(affinity_path)
             self._write_global_dir(pool_path)
+
+        # create directories for custom filters
+        self._write_global_dir(BGP_CUSTOM_FILTERS_IPV4_PATH)
+        self._write_global_dir(BGP_CUSTOM_FILTERS_IPV6_PATH)
 
         # Configure BGP global (default) config if it doesn't exist.
         self._write_global_config(BGP_NODE_DEF_AS_PATH, str(DEFAULT_AS_NUM))

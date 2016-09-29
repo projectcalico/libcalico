@@ -70,6 +70,10 @@ TEST_BGP_HOST_AS_PATH = TEST_BGP_HOST_PATH + "/as_num"
 TEST_NODE_BGP_PEERS_PATH = TEST_BGP_HOST_PATH + "/peer_v4/"
 TEST_NODE_BGP_PEERS_V6_PATH = TEST_BGP_HOST_PATH + "/peer_v6/"
 
+BGP_CUSTOM_FILTERS_PATH = BGP_GLOBAL_PATH + "/custom_filters/"
+BGP_CUSTOM_FILTERS_IPV4_PATH = BGP_CUSTOM_FILTERS_PATH + "v4/"
+BGP_CUSTOM_FILTERS_IPV6_PATH = BGP_CUSTOM_FILTERS_PATH + "v6/"
+
 IPAM_V4_PATH = "/calico/ipam/v2/host/THIS_HOST/ipv4/block/"
 IPAM_V6_PATH = "/calico/ipam/v2/host/THIS_HOST/ipv6/block/"
 
@@ -590,6 +594,8 @@ class TestDatastoreClient(unittest.TestCase):
                            call(IPV4_POOLS_PATH, None, dir=True),
                            call(IPAM_V6_PATH, None, dir=True),
                            call(IPV6_POOLS_PATH, None, dir=True),
+                           call(BGP_CUSTOM_FILTERS_IPV4_PATH, None, dir=True),
+                           call(BGP_CUSTOM_FILTERS_IPV6_PATH, None, dir=True),
                            call(BGP_NODE_DEF_AS_PATH, "64511"),
                            call(BGP_NODE_MESH_PATH, json.dumps({"enabled": True})),
                            call(log_file_path, "none"),
@@ -631,6 +637,8 @@ class TestDatastoreClient(unittest.TestCase):
                            call(IPV4_POOLS_PATH, None, dir=True),
                            call(IPAM_V6_PATH, None, dir=True),
                            call(IPV6_POOLS_PATH, None, dir=True),
+                           call(BGP_CUSTOM_FILTERS_IPV4_PATH, None, dir=True),
+                           call(BGP_CUSTOM_FILTERS_IPV6_PATH, None, dir=True),
                            call(BGP_NODE_DEF_AS_PATH, "64511"),
                            call(BGP_NODE_MESH_PATH, json.dumps({"enabled": True})),
                            call(log_file_path, "none"),
