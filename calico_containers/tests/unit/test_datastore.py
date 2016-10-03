@@ -18,7 +18,7 @@ import json
 import unittest
 from pycalico import netns
 
-from mock import ANY
+from mock import ANY, DEFAULT
 from netaddr import IPNetwork, IPAddress, AddrFormatError
 from nose.tools import *
 from nose_parameterized import parameterized
@@ -642,6 +642,16 @@ class TestDatastoreClient(unittest.TestCase):
                            call(CALICO_V_PATH + "/Ready", "true")]
         self.etcd_client.write.assert_has_calls(expected_writes)
 
+    @staticmethod
+    def read_defaults(defaults):
+        def reader(path, **kwargs):
+            value = defaults.get(path)
+            if value is not None:
+                m = Mock()
+                m.value = value
+                return m
+        return reader
+
     def test_ensure_global_config_exists(self):
         """
         Test ensure_global_config() when it already exists.
@@ -651,7 +661,13 @@ class TestDatastoreClient(unittest.TestCase):
         log_screen_path = CONFIG_PATH + "LogSeverityScreen"
         log_file_path_path = CONFIG_PATH + "LogFilePath"
         ipip_path = CONFIG_PATH + "IpInIpEnabled"
+
+        self.etcd_client.read.side_effect = self.read_defaults({
+            int_prefix_path: 'cali'
+        })
+
         self.datastore.ensure_global_config()
+
         expected_reads = [call(int_prefix_path),
                           call(BGP_NODE_DEF_AS_PATH),
                           call(BGP_NODE_MESH_PATH),
@@ -669,6 +685,22 @@ class TestDatastoreClient(unittest.TestCase):
         self.assertRaises(DataStoreError, self.datastore.ensure_global_config)
         self.etcd_client.read.assert_called_once_with(
                                                CONFIG_PATH + "InterfacePrefix")
+
+    def test_ensure_interface_preifx(self):
+        iface_prefix_path = CONFIG_PATH + 'InterfacePrefix'
+
+        self.etcd_client.read.side_effect = self.read_defaults({
+            iface_prefix_path: 'tap'
+        })
+
+        self.datastore.ensure_global_config()
+
+        expected_reads = [call(iface_prefix_path)]
+        expected_writes = [call(iface_prefix_path, 'tap,cali')]
+
+        self.etcd_client.read.assert_has_calls(expected_reads)
+        self.etcd_client.write.assert_has_calls(expected_writes)
+
 
     def test_get_profile(self):
         """
