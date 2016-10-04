@@ -14,6 +14,7 @@ wheel: dist/pycalico-$(WHEEL_VERSION)-py2-none-any.whl
 test_image: calico_test.created ## Create the calico/test image
 test: ut
 build-container: calicobuild.created
+calico/test: calico_test.created
 
 update-frozen:
 	cp build-requirements.txt build-requirements-frozen.txt
