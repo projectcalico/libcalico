@@ -81,7 +81,6 @@ class DockerHost(object):
             # Set iptables=false to prevent iptables error when using dind libnetwork
             log_and_run("docker run %s "
                         "calico/dind:latest "
-                        " --storage-driver=aufs "
                         "--iptables=false "
                         "%s" %
                     (docker_args, additional_docker_options))
