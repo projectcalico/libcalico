@@ -122,7 +122,7 @@ class DockerHost(object):
         return log_and_run(command)
 
 
-    def calicoctl(self, command):
+    def calicoctl(self, command, new=False):
         """
         Convenience function for abstracting away calling the calicoctl
         command.
@@ -134,7 +134,11 @@ class DockerHost(object):
         :return: The output from the command with leading and trailing
         whitespace removed.
         """
-        calicoctl = os.environ.get("CALICOCTL", "/code/dist/calicoctl")
+        if new:
+            calicoctl = os.environ.get(
+                "NEWCALICOCTL", "/code/dist/calicoctl")
+        else:
+            calicoctl = os.environ.get("CALICOCTL", "/code/dist/calicoctl-debian-glibc-2.13")
 
         if ETCD_SCHEME == "https":
             etcd_auth = "%s:2379" % ETCD_HOSTNAME_SSL
