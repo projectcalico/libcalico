@@ -127,9 +127,8 @@ class TestBase(TestCase):
     @debug_failures
     def assert_same(thing1, thing2):
         """
-        Compares two things.  Returns True if they are the same, False
-        otherwise.  Also outputs details of the differences if debug logging
-        is configured.
+        Compares two things.  Debug logs the differences between them before
+        asserting that they are the same.
         """
         logger.debug("Comparing.  Difference is:")
         logger.debug(pprint(DeepDiff(thing1, thing2), indent=2))
