@@ -17,9 +17,8 @@ import os
 import uuid
 import etcd
 import re
-from etcd import EtcdKeyNotFound, EtcdException, EtcdNotFile, EtcdKeyError, \
-    EtcdAlreadyExist
 
+import etcd
 from netaddr import IPNetwork, IPAddress, AddrFormatError
 
 from pycalico.datastore_datatypes import Rules, BGPPeer, IPPool, \
@@ -129,7 +128,7 @@ def handle_errors(fn):
     def wrapped(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
-        except EtcdException as e:
+        except etcd.EtcdException as e:
             # Don't leak out etcd exceptions.
             raise DataStoreError("%s: Error accessing etcd (%s).  Is etcd "
                                  "running?" % (fn.__name__, e.message))
@@ -307,12 +306,12 @@ class DatastoreClient(object):
         """
         try:
             self.etcd_client.read(key)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             guid = uuid.uuid4()
             guid_string = guid.get_hex()
             try:
                 self.etcd_client.write(key, guid_string, prevExist=False)
-            except EtcdAlreadyExist:
+            except etcd.EtcdAlreadyExist:
                 # ignore
                 pass
 
@@ -324,7 +323,7 @@ class DatastoreClient(object):
         """
         try:
             self.etcd_client.read(key)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             self.etcd_client.write(key, value)
 
     def _write_global_dir(self, key):
@@ -334,7 +333,7 @@ class DatastoreClient(object):
         """
         try:
             self.etcd_client.write(key, None, dir=True)
-        except EtcdNotFile:
+        except etcd.EtcdNotFile:
             # Directory already exists.
             pass
 
@@ -363,7 +362,7 @@ class DatastoreClient(object):
         workload_dir = host_path + "workload"
         try:
             self.etcd_client.read(workload_dir)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             # Didn't exist, create it now.
             self.etcd_client.write(workload_dir, None, dir=True)
 
@@ -374,7 +373,7 @@ class DatastoreClient(object):
         if as_num is None:
             try:
                 self.etcd_client.delete(bgp_as)
-            except EtcdKeyNotFound:
+            except etcd.EtcdKeyNotFound:
                 pass
         else:
             self.etcd_client.write(bgp_as, as_num)
@@ -407,7 +406,7 @@ class DatastoreClient(object):
         }
         try:
             return self.etcd_client.read(config_key).value
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             return None
 
     @handle_errors
@@ -428,7 +427,7 @@ class DatastoreClient(object):
         else:
             try:
                 self.etcd_client.delete(config_key)
-            except EtcdKeyNotFound:
+            except etcd.EtcdKeyNotFound:
                 pass
 
     @handle_errors
@@ -452,14 +451,14 @@ class DatastoreClient(object):
         bgp_host_path = BGP_HOST_PATH % {"hostname": hostname}
         try:
             self.etcd_client.delete(bgp_host_path, dir=True, recursive=True)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             pass
 
         # Remove the host calico tree.
         host_path = HOST_PATH % {"hostname": hostname}
         try:
             self.etcd_client.delete(host_path, dir=True, recursive=True)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             pass
 
     @handle_errors
@@ -472,7 +471,7 @@ class DatastoreClient(object):
         try:
             # Get all host data
             host_data = self.etcd_client.read(BGP_HOSTS_PATH, recursive=True)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             # No BGP hosts currently configured in etcd
             return {}
 
@@ -513,7 +512,7 @@ class DatastoreClient(object):
         try:
             hosts = self.etcd_client.read(BGP_HOSTS_PATH, recursive=True)
             host_ips = hosts.leaves
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             # No BGP hosts currently configured in etcd, so no host owns the IP
             raise KeyError("No BGP host configurations found.")
 
@@ -535,7 +534,7 @@ class DatastoreClient(object):
         """
         Check etcd for the configured IPv4 and IPv6 addresses for the specified
         host BGP binding. If it hasn't been configured yet, raise an
-        EtcdKeyNotFound.
+        etcd.EtcdKeyNotFound.
 
         :param hostname: The hostname.
         :return: A tuple containing the IPv4 and IPv6 address.
@@ -545,7 +544,7 @@ class DatastoreClient(object):
         try:
             ipv4 = self.etcd_client.read(bgp_ipv4).value
             ipv6 = self.etcd_client.read(bgp_ipv6).value
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             raise KeyError("BIRD configuration for host %s not found." % hostname)
         else:
             return (ipv4, ipv6)
@@ -562,7 +561,7 @@ class DatastoreClient(object):
         bgp_as = BGP_HOST_AS_PATH  % {"hostname": hostname}
         try:
             as_num = self.etcd_client.read(bgp_as).value
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             return None
         else:
             return as_num
@@ -584,7 +583,7 @@ class DatastoreClient(object):
         pool_path = IP_POOLS_PATH % {"version": str(version)}
         try:
             leaves = self.etcd_client.read(pool_path, recursive=True).leaves
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             # Path doesn't exist.
             pools = []
         else:
@@ -640,7 +639,7 @@ class DatastoreClient(object):
 
         try:
             data = self.etcd_client.read(key).value
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             # Re-raise with a better error message.
             raise KeyError("%s is not a configured IP pool." % cidr)
 
@@ -684,7 +683,7 @@ class DatastoreClient(object):
             # etcd is empty or ipip is disabled.
             try:
                 result = self.etcd_client.read(IP_IN_IP_PATH)
-            except EtcdKeyError:
+            except etcd.EtcdKeyError:
                 result = None
             if not result or result.value != IP_IN_IP_ENABLED:
                 self.etcd_client.write(IP_IN_IP_PATH, IP_IN_IP_ENABLED)
@@ -712,7 +711,7 @@ class DatastoreClient(object):
                              "pool": str(cidr).replace("/", "-")}
         try:
             self.etcd_client.delete(key)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             # Re-raise with a better error message.
             raise KeyError("%s is not a configured IP pool." % cidr)
 
@@ -736,7 +735,7 @@ class DatastoreClient(object):
 
         try:
             nodes = self.etcd_client.read(bgp_peers_path).children
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             # Path doesn't exist.
             return []
 
@@ -795,7 +794,7 @@ class DatastoreClient(object):
                                                   "peer_ip": str(ip)}
         try:
             self.etcd_client.delete(bgp_peer_path)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             # Re-raise with a better error message.
             raise KeyError("%s is not a configured peer." % ip)
 
@@ -810,7 +809,7 @@ class DatastoreClient(object):
         profile_path = PROFILE_PATH % {"profile_id": name}
         try:
             _ = self.etcd_client.read(profile_path)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             return False
         else:
             return True
@@ -829,7 +828,7 @@ class DatastoreClient(object):
                                       "policy_name": policy_name}
         try:
             _ = self.etcd_client.read(profile_path)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             return False
         else:
             return True
@@ -861,7 +860,7 @@ class DatastoreClient(object):
         try:
             result = self.etcd_client.read(path + "/metadata")
             metadata = json.loads(result.value)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             raise KeyError("Tier '%s' does not exist" % tier_name)
         else:
             return metadata
@@ -879,7 +878,7 @@ class DatastoreClient(object):
         path = TIER_PATH % {"tier_name": tier_name}
         try:
             self.etcd_client.delete(path, recursive=True, dir=True)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             raise KeyError("Tier '%s' does not exist" % tier_name)
 
     @handle_errors
@@ -943,7 +942,7 @@ class DatastoreClient(object):
             policy = Policy(tier_name, policy_name)
             policy.selector = result["selector"]
             policy.rules = result["rules"]
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             raise KeyError("%s/%s is not a configured policy." % \
                     (tier_name, policy_name))
         else:
@@ -962,7 +961,7 @@ class DatastoreClient(object):
                                       "policy_name": policy_name}
         try:
             self.etcd_client.delete(profile_path, recursive=True, dir=True)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             raise KeyError("%s/%s is not a configured policy."
                            % (tier_name, policy_name))
 
@@ -1011,7 +1010,7 @@ class DatastoreClient(object):
         profile_path = PROFILE_PATH % {"profile_id": name}
         try:
             self.etcd_client.delete(profile_path, recursive=True, dir=True)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             raise KeyError("%s is not a configured profile." % name)
 
     @handle_errors
@@ -1027,7 +1026,7 @@ class DatastoreClient(object):
                 packed = child.key.split("/")
                 if len(packed) > 5:
                     profiles.add(packed[5])
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             # Means the PROFILES_PATH was not set up.  So, profile does not
             # exist.
             pass
@@ -1046,7 +1045,7 @@ class DatastoreClient(object):
         try:
             _ = self.etcd_client.read(profile_path)
             profile = Profile(name)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             raise KeyError("%s is not a configured profile." % name)
 
         tags_path = TAGS_PATH % {"profile_id": name}
@@ -1054,7 +1053,7 @@ class DatastoreClient(object):
             tags_result = self.etcd_client.read(tags_path)
             tags = json.loads(tags_result.value)
             profile.tags = set(tags)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             pass
 
         rules_path = RULES_PATH % {"profile_id": name}
@@ -1062,7 +1061,7 @@ class DatastoreClient(object):
             rules_result = self.etcd_client.read(rules_path)
             rules = Rules.from_json(rules_result.value)
             profile.rules = rules
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             pass
 
         return profile
@@ -1208,7 +1207,7 @@ class DatastoreClient(object):
         try:
             # Search etcd
             leaves = self.etcd_client.read(ep_path, recursive=True).leaves
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             return []
 
         # Filter through result
@@ -1347,7 +1346,7 @@ class DatastoreClient(object):
         """
         try:
             self.etcd_client.delete("/calico", recursive=True, dir=True)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             pass
 
     @handle_errors
@@ -1364,7 +1363,7 @@ class DatastoreClient(object):
                                          "workload_id": workload_id}
         try:
             self.etcd_client.delete(workload_path, recursive=True, dir=True)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             raise KeyError("%s is not a configured workload on host %s" %
                            (workload_id, hostname))
 
@@ -1393,7 +1392,7 @@ class DatastoreClient(object):
         try:
             node_mesh = json.loads(
                                self.etcd_client.read(BGP_NODE_MESH_PATH).value)
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             node_mesh = DEFAULT_NODE_MESH
 
         return node_mesh["enabled"]
@@ -1418,7 +1417,7 @@ class DatastoreClient(object):
         # assigned in ensure_global_config().
         try:
             as_num = self.etcd_client.read(BGP_NODE_DEF_AS_PATH).value
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             return str(DEFAULT_AS_NUM)
         else:
             return str(as_num)
