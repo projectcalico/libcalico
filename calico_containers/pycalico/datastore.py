@@ -264,7 +264,7 @@ class DatastoreClient(object):
         :return: None.
         """
         # Configure Felix config.
-        self._write_global_config(CONFIG_IF_PREF_PATH, IF_PREFIX)
+        self._ensure_interface_prefix()
 
         # Configure IPAM directory structures (to ensure confd is able to
         # watch appropriate directory trees).
@@ -304,6 +304,17 @@ class DatastoreClient(object):
 
         # We are always ready.
         self.etcd_client.write(CALICO_V_PATH + "/Ready", "true")
+
+    def _ensure_interface_prefix(self):
+        try:
+            if_prefix = self.etcd_client.read(CONFIG_IF_PREF_PATH).value
+            prefixes = if_prefix.split(',')
+        except EtcdKeyNotFound:
+            prefixes = []
+
+        if IF_PREFIX not in prefixes:
+            prefixes.append(IF_PREFIX)
+            self.etcd_client.write(CONFIG_IF_PREF_PATH, ','.join(prefixes))
 
     def _ensure_cluster_guid(self, key):
         """
