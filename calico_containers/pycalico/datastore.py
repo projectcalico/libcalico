@@ -17,7 +17,8 @@ import os
 import uuid
 import etcd
 import re
-from etcd import EtcdKeyNotFound, EtcdException, EtcdNotFile, EtcdKeyError
+from etcd import EtcdKeyNotFound, EtcdException, EtcdNotFile, EtcdKeyError, \
+    EtcdAlreadyExist
 
 from netaddr import IPNetwork, IPAddress, AddrFormatError
 
