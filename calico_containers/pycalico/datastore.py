@@ -318,7 +318,7 @@ class DatastoreClient(object):
             guid_string = guid.get_hex()
             try:
                 self.etcd_client.write(key, guid_string, prevExist=False)
-            except EtcdAlreadyExist:
+            except etcd.EtcdAlreadyExist:
                 # ignore
                 pass
 
