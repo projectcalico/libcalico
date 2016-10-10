@@ -309,7 +309,7 @@ class DatastoreClient(object):
         try:
             if_prefix = self.etcd_client.read(CONFIG_IF_PREF_PATH).value
             prefixes = if_prefix.split(',')
-        except EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             prefixes = []
 
         if IF_PREFIX not in prefixes:
