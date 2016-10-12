@@ -18,12 +18,17 @@ from subprocess import CalledProcessError
 from functools import partial
 
 from utils import get_ip, log_and_run, retry_until_success, ETCD_SCHEME, \
-                  ETCD_CA, ETCD_KEY, ETCD_CERT, ETCD_HOSTNAME_SSL
+    ETCD_CA, ETCD_KEY, ETCD_CERT, ETCD_HOSTNAME_SSL
 from workload import Workload
 from network import DockerNetwork
 
 logger = logging.getLogger(__name__)
-CHECKOUT_DIR = os.getenv("HOST_CHECKOUT_DIR", os.getcwd())
+# We want to default CHECKOUT_DIR if either the ENV var is unset
+# OR its set to an empty string.
+CHECKOUT_DIR = os.getenv("HOST_CHECKOUT_DIR", "")
+if CHECKOUT_DIR == "":
+    CHECKOUT_DIR = os.getcwd()
+
 
 class DockerHost(object):
     """
@@ -37,6 +42,7 @@ class DockerHost(object):
     hostname for the host which it will pass to all calicoctl components as the HOSTNAME
     environment variable.  If set to False, the HOSTNAME environment is not explicitly set.
     """
+
     def __init__(self, name, start_calico=True, dind=True,
                  additional_docker_options="",
                  post_docker_commands=["docker load -i /code/calico-node.tar",
@@ -84,10 +90,10 @@ class DockerHost(object):
                         " --storage-driver=aufs "
                         "--iptables=false "
                         "%s" %
-                    (docker_args, additional_docker_options))
+                        (docker_args, additional_docker_options))
 
             self.ip = log_and_run("docker inspect --format "
-                              "'{{.NetworkSettings.Networks.bridge.IPAddress}}' %s" % self.name)
+                                  "'{{.NetworkSettings.Networks.bridge.IPAddress}}' %s" % self.name)
 
             # Make sure docker is up
             docker_ps = partial(self.execute, "docker ps")
@@ -121,7 +127,6 @@ class DockerHost(object):
 
         return log_and_run(command)
 
-
     def calicoctl(self, command, new=False):
         """
         Convenience function for abstracting away calling the calicoctl
@@ -136,9 +141,9 @@ class DockerHost(object):
         """
         if new:
             calicoctl = os.environ.get(
-                "NEWCALICOCTL", "/code/dist/calicoctl")
+                "NEWCALICOCTL", "/code/dist/calicoctl.go")
         else:
-            calicoctl = os.environ.get("CALICOCTL", "/code/dist/calicoctl-debian-glibc-2.13")
+            calicoctl = os.environ.get("CALICOCTL", "/code/dist/calicoctl")
 
         if ETCD_SCHEME == "https":
             etcd_auth = "%s:2379" % ETCD_HOSTNAME_SSL
@@ -157,7 +162,8 @@ class DockerHost(object):
                      calicoctl)
         # If the hostname is being overriden, then export the HOSTNAME environment.
         if self.override_hostname:
-            calicoctl = "export HOSTNAME=%s; %s" % (self.override_hostname, calicoctl)
+            calicoctl = "export HOSTNAME=%s; %s" % (
+            self.override_hostname, calicoctl)
 
         return self.execute(calicoctl + " " + command)
 
@@ -213,7 +219,6 @@ class DockerHost(object):
                      "calico/node:latest" % (hostname_args,
                                              self.ip,
                                              etcd_auth, ETCD_SCHEME, ssl_args))
-
 
     def remove_workloads(self):
         """
