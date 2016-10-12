@@ -17,12 +17,12 @@ MAINTAINER Tom Denham <tom@projectcalico.org>
 WORKDIR /code/
 
 RUN apt-get update && \
-    apt-get install -qy python-dev python-pip git libffi-dev libssl-dev procps
+    apt-get install -qy python-dev python-pip git libffi-dev libssl-dev procps && rm -rf /var/lib/apt/lists/*
 
 # Install the python packages needed for building binaries for Calico Python components.
 # Git is installed to allow pip installation from a Github repository.
-RUN pip install --upgrade pip
+RUN pip --no-cache-dir install --upgrade pip
 ADD build-requirements-frozen.txt /code/
-RUN pip install -r build-requirements-frozen.txt
+RUN pip --no-cache-dir install -r build-requirements-frozen.txt
 ADD . /tmp/pycalico
-RUN pip install /tmp/pycalico
+RUN pip --no-cache-dir install /tmp/pycalico
