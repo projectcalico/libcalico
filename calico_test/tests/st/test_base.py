@@ -18,8 +18,6 @@ from unittest import TestCase
 from tests.st.utils.utils import (get_ip, ETCD_SCHEME, ETCD_CA, ETCD_CERT,
                                   ETCD_KEY, debug_failures, ETCD_HOSTNAME_SSL)
 import logging
-from deepdiff import DeepDiff
-from pprint import pprint
 
 HOST_IPV6 = get_ip(v6=True)
 HOST_IPV4 = get_ip()
@@ -123,13 +121,4 @@ class TestBase(TestCase):
 
         return json.loads(rc.strip())
 
-    @staticmethod
-    @debug_failures
-    def assert_same(thing1, thing2):
-        """
-        Compares two things.  Debug logs the differences between them before
-        asserting that they are the same.
-        """
-        logger.debug("Comparing.  Difference is:")
-        logger.debug(pprint(DeepDiff(thing1, thing2), indent=2))
-        assert cmp(thing1, thing2) == 0
+
