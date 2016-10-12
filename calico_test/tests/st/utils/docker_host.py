@@ -23,7 +23,12 @@ from workload import Workload
 from network import DockerNetwork
 
 logger = logging.getLogger(__name__)
-CHECKOUT_DIR = os.getenv("HOST_CHECKOUT_DIR", os.getcwd())
+# We want to default CHECKOUT_DIR if either the ENV var is unset
+# OR its set to an empty string.
+CHECKOUT_DIR = os.getenv("HOST_CHECKOUT_DIR", "")
+if CHECKOUT_DIR == "":
+    CHECKOUT_DIR = os.getcwd()
+
 
 
 class DockerHost(object):
@@ -93,10 +98,15 @@ class DockerHost(object):
                         "%s" %
                         (docker_args, additional_docker_options))
 
+<<<<<<< 37fdc7776d7a66410759f7bd61248f4206129b12
             self.ip = log_and_run(
                 "docker inspect --format "
                 "'{{.NetworkSettings.Networks.bridge.IPAddress}}' %s" %
                 self.name)
+=======
+            self.ip = log_and_run("docker inspect --format "
+                                  "'{{.NetworkSettings.Networks.bridge.IPAddress}}' %s" % self.name)
+>>>>>>> Change default calicoctl name to avoid breaking libnetwork-plugins tests
 
             # Make sure docker is up
             docker_ps = partial(self.execute, "docker ps")
@@ -145,9 +155,9 @@ class DockerHost(object):
         """
         if new:
             calicoctl = os.environ.get(
-                "NEWCALICOCTL", "/code/dist/calicoctl")
+                "NEWCALICOCTL", "/code/dist/calicoctl.go")
         else:
-            calicoctl = os.environ.get("CALICOCTL", "/code/dist/calicoctl-debian-glibc-2.13")
+            calicoctl = os.environ.get("CALICOCTL", "/code/dist/calicoctl")
 
         if ETCD_SCHEME == "https":
             etcd_auth = "%s:2379" % ETCD_HOSTNAME_SSL
