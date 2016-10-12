@@ -45,7 +45,7 @@ def get_ip(v6=False):
     ip = os.environ.get(env)
     if not ip:
         try:
-            # No env variable set; try to auto detect.
+            logger.debug("%s not set; try to auto detect IP.", env)
             socket_type = socket.AF_INET6 if v6 else socket.AF_INET
             s = socket.socket(socket_type, socket.SOCK_DGRAM)
             remote_ip = "2001:4860:4860::8888" if v6 else "8.8.8.8"
@@ -58,6 +58,8 @@ def get_ip(v6=False):
             ips = get_host_ips(version)
             if ips:
                 ip = str(ips[0])
+    else:
+        logger.debug("Got local IP from %s=%s", env, ip)
 
     return ip
 
