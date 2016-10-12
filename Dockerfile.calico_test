@@ -62,5 +62,9 @@ RUN pip install -r /tmp/pycalico/calico_test/requirements.txt
 # Add the testing framework
 ADD calico_test/tests tests
 
+# Install etcdctl
+RUN wget https://github.com/coreos/etcd/releases/download/v2.3.3/etcd-v2.3.3-linux-amd64.tar.gz && tar -xzf etcd-v2.3.3-linux-amd64.tar.gz
+RUN cd etcd-v2.3.3-linux-amd64 && mv etcdctl /usr/local/bin/
+
 # The container is used by mounting the code-under-test to /code
 WORKDIR /code/
