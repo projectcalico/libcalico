@@ -400,9 +400,10 @@ class DatastoreClient(object):
         # not otherwise firewalled by the host administrator or profiles).
         # This is important for Mesos, where the containerized executor process
         # needs to exchange messages with the Mesos Slave process running on
-        # the host.
-        self.set_per_host_config(hostname, "DefaultEndpointToHostAction",
-                                 "RETURN")
+        # the host.  Don't overwrite the value if it's already present.
+        if self.get_per_host_config(hostname, "DefaultEndpointToHostAction") is None:
+            self.set_per_host_config(hostname, "DefaultEndpointToHostAction",
+                                    "RETURN")
 
         # Flag that the host is created.
         self.set_per_host_config(hostname, "marker", "created")

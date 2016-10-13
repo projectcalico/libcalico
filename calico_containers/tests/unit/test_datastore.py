@@ -953,6 +953,9 @@ class TestDatastoreClient(unittest.TestCase):
             result = Mock(spec=EtcdResult)
             if path == TEST_HOST_PATH + "/workload":
                 return result
+            elif path == TEST_HOST_PATH + "/config/DefaultEndpointToHostAction":
+                result.value = "RETURN"
+                return result
             else:
                 assert False
 
@@ -966,14 +969,11 @@ class TestDatastoreClient(unittest.TestCase):
                            call(TEST_BGP_HOST_IPV4_PATH, ipv4),
                            call(TEST_BGP_HOST_IPV6_PATH, ipv6),
                            call(TEST_BGP_HOST_AS_PATH, bgp_as),
-                           call(TEST_HOST_PATH +
-                                "/config/DefaultEndpointToHostAction",
-                                "RETURN"),
                            call(TEST_HOST_PATH + "/config/marker",
                                 "created")]
         self.etcd_client.write.assert_has_calls(expected_writes,
                                                 any_order=True)
-        assert_equal(self.etcd_client.write.call_count, 6)
+        assert_equal(self.etcd_client.write.call_count, 5)
 
     def test_create_host_mainline(self):
         """
@@ -983,6 +983,8 @@ class TestDatastoreClient(unittest.TestCase):
         """
         def mock_read(path):
             if path == CALICO_V_PATH + "/host/TEST_HOST/workload":
+                raise EtcdKeyNotFound()
+            elif path == TEST_HOST_PATH + "/config/DefaultEndpointToHostAction":
                 raise EtcdKeyNotFound()
             else:
                 assert False
