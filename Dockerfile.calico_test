@@ -42,7 +42,7 @@ MAINTAINER Tom Denham <tom@projectcalico.org>
 # We install glibc onto the official docker image (instead of adding docker to 
 # the libc image) since glibc installs are more constant than the 
 # docker-in-docker installation and configuration.
-RUN apk add --update python python-dev py-pip py-setuptools \
+RUN apk add --update python python-dev py-pip py-setuptools openssl-dev libffi-dev \
         git musl-dev gcc \
         iptables ip6tables iproute2 iputils ipset curl && \
         curl -o glibc.apk -L "https://github.com/andyshinn/alpine-pkg-glibc/releases/download/2.23-r1/glibc-2.23-r1.apk" && \
