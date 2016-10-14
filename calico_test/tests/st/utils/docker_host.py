@@ -195,7 +195,7 @@ class DockerHost(object):
         args.append(options)
 
         cmd = ' '.join(args)
-        self.calicoctl(cmd)
+        self.calicoctl(cmd, new=False)
 
     def start_calico_node_with_docker(self):
         """

@@ -21,6 +21,7 @@ from subprocess import CalledProcessError
 from exceptions import CommandExecError
 import re
 import json
+import yaml
 from pycalico.util import get_host_ips
 
 LOCAL_IP_ENV = "MY_IP"
@@ -185,7 +186,7 @@ def check_bird_status(host, expected):
 
 
 @debug_failures
-def assert_number_endpoints(host, expected):
+def assert_number_endpoints(host, expected, go=False):
     """
     Check that a host has the expected number of endpoints in Calico
     Parses the "calicoctl endpoint show" command for number of endpoints.
@@ -194,18 +195,28 @@ def assert_number_endpoints(host, expected):
 
     :param host: DockerHost object
     :param expected: int, number of expected endpoints
+    :param go: boolean - whether to use the golang calicoctl or not.
     :return: None
     """
     hostname = host.get_hostname()
-    output = host.calicoctl("endpoint show")
-    lines = output.split("\n")
-    actual = 0
+    if go:
+        out = host.calicoctl("get workloadEndpoint -o yaml", new=True)
+        output = yaml.safe_load(out)
+        actual = 0
+        for endpoint in output:
+            if endpoint['metadata']['hostname'] == hostname:
+                actual += 1
 
-    for line in lines:
-        columns = re.split("\s*\|\s*", line.strip())
-        if len(columns) > 1 and columns[1] == hostname:
-            actual = columns[4]
-            break
+    else:
+        output = host.calicoctl("endpoint show")
+        lines = output.split("\n")
+        actual = 0
+
+        for line in lines:
+            columns = re.split("\s*\|\s*", line.strip())
+            if len(columns) > 1 and columns[1] == hostname:
+                actual = columns[4]
+                break
 
     if int(actual) != int(expected):
         msg = "Incorrect number of endpoints: \n" \
@@ -214,7 +225,7 @@ def assert_number_endpoints(host, expected):
 
 
 @debug_failures
-def assert_profile(host, profile_name):
+def assert_profile(host, profile_name, go=False):
     """
     Check that profile is registered in Calico
     Parse "calicoctl profile show" for the given profilename
@@ -223,15 +234,24 @@ def assert_profile(host, profile_name):
     :param profile_name: String of the name of the profile
     :return: Boolean: True if found, False if not found
     """
-    output = host.calicoctl("profile show")
-    lines = output.split("\n")
-    found = False
+    if go:
+        out = host.calicoctl("get -o yaml profile ", new=True)
+        output = yaml.safe_load(out)
+        found = False
+        for profile in output:
+            if profile['metadata']['name'] == profile_name:
+                found = True
+                break
+    else:
+        output = host.calicoctl("profile show")
+        lines = output.split("\n")
+        found = False
 
-    for line in lines:
-        columns = re.split("\s*\|\s*", line.strip())
-        if len(columns) > 1 and profile_name == columns[1]:
-            found = True
-            break
+        for line in lines:
+            columns = re.split("\s*\|\s*", line.strip())
+            if len(columns) > 1 and profile_name == columns[1]:
+                found = True
+                break
 
     if not found:
         raise AssertionError("Profile %s not found in Calico" % profile_name)
