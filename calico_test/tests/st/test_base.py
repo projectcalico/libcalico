@@ -12,12 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import json
+import yaml
+import logging
 import subprocess
+from pprint import pformat
 from unittest import TestCase
+
+from deepdiff import DeepDiff
 
 from tests.st.utils.utils import (get_ip, ETCD_SCHEME, ETCD_CA, ETCD_CERT,
                                   ETCD_KEY, debug_failures, ETCD_HOSTNAME_SSL)
-import logging
 
 HOST_IPV6 = get_ip(v6=True)
 HOST_IPV4 = get_ip()
@@ -105,7 +109,7 @@ class TestBase(TestCase):
         :param recursive:  Whether we want recursive query or not
         :return:  The JSON decoded response.
         """
-        if options is None: 
+        if options is None:
             options = []
         if ETCD_SCHEME == "https":
             # Etcd is running with SSL/TLS, require key/certificates
@@ -122,3 +126,36 @@ class TestBase(TestCase):
                 shell=True)
 
         return json.loads(rc.strip())
+
+    def check_data_in_datastore(self, host, data, resource, yaml_format=True):
+        if yaml_format:
+            out = host.calicoctl(
+                "get %s --output=yaml" % resource, new=True)
+            output = yaml.safe_load(out)
+        else:
+            out = host.calicoctl(
+                "get %s --output=json" % resource, new=True)
+            output = json.loads(out)
+        self.assert_same(data, output)
+
+    @staticmethod
+    def assert_same(thing1, thing2):
+        """
+        Compares two things.  Debug logs the differences between them before
+        asserting that they are the same.
+        """
+        assert cmp(thing1, thing2) == 0, \
+            "Items are not the same.  Difference is:\n %s" % \
+            pformat(DeepDiff(thing1, thing2), indent=2)
+
+    @staticmethod
+    def writeyaml(filename, data):
+        with open(filename, 'w') as f:
+            f.write(yaml.dump(data, default_flow_style=False))
+
+    @staticmethod
+    def writejson(filename, data):
+        with open(filename, 'w') as f:
+            f.write(json.dumps(data, sort_keys=True, indent=2,
+                               separators=(',', ': ')))
+
