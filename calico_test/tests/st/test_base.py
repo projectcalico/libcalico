@@ -97,7 +97,7 @@ class TestBase(TestCase):
             for ip in ip_fail_list:
                 workload.assert_cant_ping(ip)
 
-    def curl_etcd(self, path, options=[], recursive=True):
+    def curl_etcd(self, path, options=None, recursive=True):
         """
         Perform a curl to etcd, returning JSON decoded response.
         :param path:  The key path to query
@@ -105,6 +105,8 @@ class TestBase(TestCase):
         :param recursive:  Whether we want recursive query or not
         :return:  The JSON decoded response.
         """
+        if options is None: 
+            options = []
         if ETCD_SCHEME == "https":
             # Etcd is running with SSL/TLS, require key/certificates
             rc = subprocess.check_output(
@@ -120,5 +122,3 @@ class TestBase(TestCase):
                 shell=True)
 
         return json.loads(rc.strip())
-
-
