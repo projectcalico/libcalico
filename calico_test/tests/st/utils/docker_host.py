@@ -30,7 +30,6 @@ if CHECKOUT_DIR == "":
     CHECKOUT_DIR = os.getcwd()
 
 
-
 class DockerHost(object):
     """
     A host container which will hold workload containers to be networked by
@@ -98,15 +97,10 @@ class DockerHost(object):
                         "%s" %
                         (docker_args, additional_docker_options))
 
-<<<<<<< 37fdc7776d7a66410759f7bd61248f4206129b12
             self.ip = log_and_run(
                 "docker inspect --format "
                 "'{{.NetworkSettings.Networks.bridge.IPAddress}}' %s" %
                 self.name)
-=======
-            self.ip = log_and_run("docker inspect --format "
-                                  "'{{.NetworkSettings.Networks.bridge.IPAddress}}' %s" % self.name)
->>>>>>> Change default calicoctl name to avoid breaking libnetwork-plugins tests
 
             # Make sure docker is up
             docker_ps = partial(self.execute, "docker ps")
