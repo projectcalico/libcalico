@@ -28,7 +28,7 @@
 # running of the ST frameworks. Additionally, this allows for sharing of
 # common ST framework code (which calico-containers and libnetwork both use).
 # To run:
-# - volume mount the docker socket, allowing the STs to launch docker 
+# - volume mount the docker socket, allowing the STs to launch docker
 #   containers alongside itself.
 # - eliminate most isolation, (--uts=host --pid=host --net=host --privileged)
 # - volume mount your ST source code
@@ -37,10 +37,10 @@ FROM docker
 MAINTAINER Tom Denham <tom@projectcalico.org>
 
 # Running STs in this containers require that it has all dependencies installed
-# for executing calicoctl. Install these dependencies (including glibc: 
+# for executing calicoctl. Install these dependencies (including glibc:
 # https://github.com/jeanblanchard/docker-alpine-glibc/blob/master/Dockerfile)
-# We install glibc onto the official docker image (instead of adding docker to 
-# the libc image) since glibc installs are more constant than the 
+# We install glibc onto the official docker image (instead of adding docker to
+# the libc image) since glibc installs are more constant than the
 # docker-in-docker installation and configuration.
 RUN apk add --update python python-dev py-pip py-setuptools \
         git musl-dev gcc \
@@ -64,4 +64,3 @@ ADD calico_test/tests tests
 
 # The container is used by mounting the code-under-test to /code
 WORKDIR /code/
-

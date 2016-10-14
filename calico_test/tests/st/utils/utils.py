@@ -33,6 +33,7 @@ ETCD_CERT = os.environ.get("ETCD_CERT_FILE", "")
 ETCD_KEY = os.environ.get("ETCD_KEY_FILE", "")
 ETCD_HOSTNAME_SSL = "etcd-authority-ssl"
 
+
 def get_ip(v6=False):
     """
     Return a string of the IP of the hosts interface.
@@ -107,19 +108,21 @@ def debug_failures(fn):
     :param fn: The function to decorate.
     :return: The decorated function.
     """
+
     def wrapped(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
         except KeyboardInterrupt:
             raise
         except Exception as e:
-            if (os.getenv("DEBUG_FAILURES") != None and
-                os.getenv("DEBUG_FAILURES").lower() == "true"):
+            if (os.getenv("DEBUG_FAILURES") is not None and os.getenv(
+                    "DEBUG_FAILURES").lower() == "true"):
                 logger.error("TEST FAILED:\n%s\nEntering DEBUG mode."
                              % e.message)
                 pdb.set_trace()
             else:
                 raise e
+
     return wrapped
 
 
@@ -199,13 +202,14 @@ def assert_number_endpoints(host, expected):
     for line in lines:
         columns = re.split("\s*\|\s*", line.strip())
         if len(columns) > 1 and columns[1] == hostname:
-                actual = columns[4]
-                break
+            actual = columns[4]
+            break
 
     if int(actual) != int(expected):
         msg = "Incorrect number of endpoints: \n" \
               "Expected: %s; Actual: %s" % (expected, actual)
         raise AssertionError(msg)
+
 
 @debug_failures
 def assert_profile(host, profile_name):
@@ -224,11 +228,12 @@ def assert_profile(host, profile_name):
     for line in lines:
         columns = re.split("\s*\|\s*", line.strip())
         if len(columns) > 1 and profile_name == columns[1]:
-                found = True
-                break
+            found = True
+            break
 
     if not found:
         raise AssertionError("Profile %s not found in Calico" % profile_name)
+
 
 def get_profile_name(host, network):
     """
@@ -246,6 +251,7 @@ def get_profile_name(host, network):
     # Network inspect returns a list of dicts for each network being inspected.
     # We are only inspecting 1, so use the first entry.
     return info[0]["Id"]
+
 
 @debug_failures
 def assert_network(host, network):

@@ -34,6 +34,7 @@ class TestBase(TestCase):
     """
     Base class for test-wide methods.
     """
+
     def setUp(self):
         """
         Clean up before every test.
@@ -46,7 +47,8 @@ class TestBase(TestCase):
 
         # Disable Usage Reporting to usage.projectcalico.org
         # We want to avoid polluting analytics data with unit test noise
-        self.curl_etcd("calico/v1/config/UsageReportingEnabled", options=["-XPUT -d value=False"])
+        self.curl_etcd("calico/v1/config/UsageReportingEnabled",
+                       options=["-XPUT -d value=False"])
 
         # Log a newline to ensure that the first log appears on its own line.
         logger.info("")
