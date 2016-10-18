@@ -47,8 +47,8 @@ class DockerHost(object):
 
     def __init__(self, name, start_calico=True, dind=True,
                  additional_docker_options="",
-                 post_docker_commands=["docker load -i /code/calico-node.tar",
-                                       "docker load -i /code/busybox.tar"],
+                 post_docker_commands=["docker load -i /code/calico-node.tgz",
+                                       "docker load -i /code/busybox.tgz"],
                  calico_node_autodetect_ip=False,
                  override_hostname=False):
         self.name = name
@@ -377,3 +377,12 @@ class DockerHost(object):
 
         command = "docker inspect --format {{.Config.Hostname}} %s" % self.name
         return log_and_run(command)
+
+    def writefile(self, filename, data):
+        """
+        Writes a file on a host (e.g. a yaml file for loading into calicoctl).
+        :param filename: string, the filename to create
+        :param data: string, the data to put inthe file
+        :return: Return code of execute operation.
+        """
+        return self.execute("cat << EOF > %s\n%s" % (filename, data))
