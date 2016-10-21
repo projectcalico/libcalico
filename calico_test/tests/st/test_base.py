@@ -58,7 +58,8 @@ class TestBase(TestCase):
         logger.info("")
 
     @debug_failures
-    def assert_connectivity(self, pass_list, fail_list=None, retries=0):
+    def assert_connectivity(self, pass_list, fail_list=None, retries=0,
+                            type_list=None):
         """
         Assert partial connectivity graphs between workloads.
 
@@ -68,18 +69,33 @@ class TestBase(TestCase):
         ping each workload in this list. Interconnectivity is not checked
         *within* the fail_list.
         :param retries: The number of retries.
+        :param type_list: list of types to test.  If not specified, defaults to
+        icmp only.
         """
+        if type_list is None:
+            type_list = ['icmp', 'tcp', 'udp']
         if fail_list is None:
             fail_list = []
+
         for source in pass_list:
             for dest in pass_list:
-                source.assert_can_ping(dest.ip, retries)
+                if 'icmp' in type_list:
+                    source.assert_can_ping(dest.ip, retries)
+                if 'tcp' in type_list:
+                    source.assert_can_tcp(dest.ip, retries)
+                if 'udp' in type_list:
+                    source.assert_can_udp(dest.ip, retries)
             for dest in fail_list:
-                source.assert_cant_ping(dest.ip, retries)
+                if 'icmp' in type_list:
+                    source.assert_cant_ping(dest.ip, retries)
+                if 'tcp' in type_list:
+                    source.assert_cant_tcp(dest.ip, retries)
+                if 'udp' in type_list:
+                    source.assert_cant_udp(dest.ip, retries)
 
     @debug_failures
     def assert_ip_connectivity(self, workload_list, ip_pass_list,
-                               ip_fail_list=None):
+                               ip_fail_list=None, type_list=None):
         """
         Assert partial connectivity graphs between workloads and given ips.
 
@@ -92,14 +108,29 @@ class TestBase(TestCase):
         :param ip_fail_list: Every workload in workload_list should *not* be
         able to ping any ip in this list. Interconnectivity is not checked
         *within* the fail_list.
+        :param type_list: list of types to test.  If not specified, defaults to
+        icmp only.
         """
+        if type_list is None:
+            type_list = ['icmp']
         if ip_fail_list is None:
             ip_fail_list = []
         for workload in workload_list:
             for ip in ip_pass_list:
-                workload.assert_can_ping(ip)
+                if 'icmp' in type_list:
+                    workload.assert_can_ping(ip)
+                if 'tcp' in type_list:
+                    workload.assert_can_tcp(ip)
+                if 'udp' in type_list:
+                    workload.assert_can_udp(ip)
+
             for ip in ip_fail_list:
-                workload.assert_cant_ping(ip)
+                if 'icmp' in type_list:
+                    workload.assert_cant_ping(ip)
+                if 'tcp' in type_list:
+                    workload.assert_cant_tcp(ip)
+                if 'udp' in type_list:
+                    workload.assert_cant_udp(ip)
 
     def curl_etcd(self, path, options=None, recursive=True):
         """
@@ -158,4 +189,3 @@ class TestBase(TestCase):
         with open(filename, 'w') as f:
             f.write(json.dumps(data, sort_keys=True, indent=2,
                                separators=(',', ': ')))
-

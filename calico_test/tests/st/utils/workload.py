@@ -11,14 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from functools import partial
 import logging
+from functools import partial
 
 from netaddr import IPAddress
 
-from utils import retry_until_success, debug_failures
-from network import DockerNetwork
 from exceptions import CommandExecError
+from utils import retry_until_success, debug_failures
+
 NET_NONE = "none"
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,7 @@ class Workload(object):
     These are the end-users containers that will run application-level
     software.
     """
+
     def __init__(self, host, name, image="busybox", network="bridge", ip=None):
         """
         Create the workload and detect its IPs.
@@ -54,9 +55,10 @@ class Workload(object):
         command = "docker run -tid --name %s --net %s %s %s" % \
                   (name, network, ip_option, image)
         host.execute(command)
-        self.ip = host.execute("docker inspect --format "
-                              "'{{.NetworkSettings.Networks.%s.IPAddress}}' %s"
-                               % (network, name))
+        self.ip = host.execute(
+            "docker inspect --format "
+            "'{{.NetworkSettings.Networks.%s.IPAddress}}' %s"
+            % (network, name))
 
     def execute(self, command):
         """
@@ -93,7 +95,11 @@ class Workload(object):
             "-c", "1",  # Number of pings
             "-W", "1",  # Timeout for each ping
             ip,
-        ]
+            # "hping",
+            # "-1",      # icmp mode
+            # ip,
+            # "-c", "1"  # just once
+         ]
         command = ' '.join(args)
 
         ping = partial(self.execute, command)
@@ -148,6 +154,178 @@ class Workload(object):
                                 ex_class=_PingError)
         except _PingError:
             raise AssertionError("%s can ping %s" % (self, ip))
+
+    def _get_tcp_function(self, ip):
+        """
+        Return a function to check tcp connectivity to another ip.
+
+        :param ip: The ip to check against.
+        :return: A partial function that can be executed to perform the check.
+        The function raises a CommandExecError exception if the check fails,
+        or returns the output of the check.
+        """
+        # test_string = "hello"
+        args = [
+            # "echo", test_string, "|",  # send data to responder
+            # "nc", "-w1",  # Timeout after 1 second
+            # ip,
+            # "80",  # Responder is listening on port 80
+            # "|", "grep", test_string  # Check that we get a response
+
+            "/code/tcpping.sh",
+            ip,
+
+            # "hping",
+            # ip,
+            # "-p", "80",  # port 80
+            # "-c", "1"  # just once
+        ]
+
+        command = ' '.join(args)
+
+        tcp_check = partial(self.execute, command)
+        return tcp_check
+
+    @debug_failures
+    def assert_can_tcp(self, ip, retries=0):
+        """
+        Execute a tcp check from this ip to the other ip.
+        Assert that a ip can connect to another ip.
+        Use retries to allow for convergence.
+
+        Use of this method assumes the network will be transitioning from a
+        state where the destination is currently unreachable.
+
+        :param ip:  The ip to check connectivity to.
+        :param retries: The number of retries.
+        :return: None.
+        """
+        try:
+            retry_until_success(self._get_tcp_function(ip),
+                                retries=retries,
+                                ex_class=CommandExecError)
+        except CommandExecError:
+            raise AssertionError("%s cannot connect with tcp to %s" %
+                                 (self, ip))
+
+    @debug_failures
+    def assert_cant_tcp(self, ip, retries=0):
+        """
+        Execute a ping from this workload to an ip.
+        Assert that the workload cannot connect to an IP using tcp.
+        Use retries to allow for convergence.
+
+        Use of this method assumes the network will be transitioning from a
+        state where the destination is currently reachable.
+
+        :param ip:  The ip to check connectivity to.
+        :param retries: The number of retries.
+        :return: None.
+        """
+        tcp_check = self._get_tcp_function(ip)
+
+        def cant_tcp():
+            try:
+                tcp_check()
+            except CommandExecError:
+                pass
+            else:
+                raise _PingError()
+
+        try:
+            retry_until_success(cant_tcp,
+                                retries=retries,
+                                ex_class=_PingError)
+        except _PingError:
+            raise AssertionError("%s can connect with tcp to %s" %
+                                 (self, ip))
+
+    def _get_udp_function(self, ip):
+        """
+        Return a function to check udp connectivity to another ip.
+
+        :param ip: The ip to check against.
+        :return: A partial function that can be executed to perform the check.
+        The function raises a CommandExecError exception if the check fails,
+        or returns the output of the check.
+        """
+        # test_string = "hello"
+        args = [
+            # "echo", test_string, "|",  # send data to responder
+            # "nc", "-u",  # Use udp
+            # "-w1",  # Timeout after 1 second
+            # ip,
+            # "69",  # Responder is listening on port 69
+            # "|", "grep", test_string  # Check that we get a response
+
+            "/code/udpping.sh",
+            ip,
+
+            # "hping",
+            # "-2",  # udp mode
+            # ip,
+            # "-p", "69",  # port 69
+            # "-c", "1"  # just once
+        ]
+
+        command = ' '.join(args)
+
+        udp_check = partial(self.execute, command)
+        return udp_check
+
+    @debug_failures
+    def assert_can_udp(self, ip, retries=0):
+        """
+        Execute a udp check from this workload to an ip.
+        Assert that this workload can connect to another ip.
+        Use retries to allow for convergence.
+
+        Use of this method assumes the network will be transitioning from a
+        state where the destination is currently unreachable.
+
+        :param ip:  The ip to check connectivity to.
+        :param retries: The number of retries.
+        :return: None.
+        """
+        try:
+            retry_until_success(self._get_udp_function(ip),
+                                retries=retries,
+                                ex_class=CommandExecError)
+        except CommandExecError:
+            raise AssertionError("%s cannot connect with udp to %s" %
+                                 (self, ip))
+
+    @debug_failures
+    def assert_cant_udp(self, ip, retries=0):
+        """
+        Execute a udp check from this workload to the ip.  Assert that
+        the workload cannot connect via udp to an IP.
+        Use retries to allow for convergence.
+
+        Use of this method assumes the network will be transitioning from a
+        state where the destination is currently reachable.
+
+        :param ip:  The ip to check connectivity to.
+        :param retries: The number of retries.
+        :return: None.
+        """
+        udp_check = self._get_udp_function(ip)
+
+        def cant_udp():
+            try:
+                udp_check()
+            except CommandExecError:
+                pass
+            else:
+                raise _PingError()
+
+        try:
+            retry_until_success(cant_udp,
+                                retries=retries,
+                                ex_class=_PingError)
+        except _PingError:
+            raise AssertionError("%s can connect with udp to %s" %
+                                 (self, ip))
 
     def __str__(self):
         return self.name
