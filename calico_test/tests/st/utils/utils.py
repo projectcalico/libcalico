@@ -204,7 +204,7 @@ def assert_number_endpoints(host, expected, go=False):
         output = yaml.safe_load(out)
         actual = 0
         for endpoint in output:
-            if endpoint['metadata']['hostname'] == hostname:
+            if endpoint['metadata']['node'] == hostname:
                 actual += 1
 
     else:
