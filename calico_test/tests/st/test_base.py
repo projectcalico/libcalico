@@ -182,10 +182,16 @@ class TestBase(TestCase):
     @staticmethod
     def writeyaml(filename, data):
         with open(filename, 'w') as f:
-            f.write(yaml.dump(data, default_flow_style=False))
+            text = yaml.dump(data, default_flow_style=False)
+            logger.debug("Writing %s: \n%s" % (filename, text))
+            f.write(text)
 
     @staticmethod
     def writejson(filename, data):
         with open(filename, 'w') as f:
-            f.write(json.dumps(data, sort_keys=True, indent=2,
-                               separators=(',', ': ')))
+            text = json.dumps(data,
+                              sort_keys=True,
+                              indent=2,
+                              separators=(',', ': '))
+            logger.debug("Writing %s: \n%s" % (filename, text))
+            f.write(text)
