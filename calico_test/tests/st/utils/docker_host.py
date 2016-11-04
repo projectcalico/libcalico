@@ -47,8 +47,8 @@ class DockerHost(object):
 
     def __init__(self, name, start_calico=True, dind=True,
                  additional_docker_options="",
-                 post_docker_commands=["docker load -i /code/calico-node.tgz",
-                                       "docker load -i /code/busybox.tgz"],
+                 post_docker_commands=["docker load -i /code/calico-node.tar",
+                                       "docker load -i /code/busybox.tar"],
                  calico_node_autodetect_ip=False,
                  override_hostname=False):
         self.name = name
