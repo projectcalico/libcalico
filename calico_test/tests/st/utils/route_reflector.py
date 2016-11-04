@@ -47,7 +47,7 @@ class RouteReflectorCluster(object):
             for jj in range(self.num_in_redundancy_group):
                 rr = DockerHost('RR.%d.%d' % (ii, jj), start_calico=False)
                 ip = "-e IP=%s" % rr.ip
-                rr.execute("docker load --input /code/routereflector.tgz")
+                rr.execute("docker load --input /code/routereflector.tar")
 
                 # Check which type of etcd is being run, then invoke the
                 # suggested curl command to add the RR entry to etcd.
