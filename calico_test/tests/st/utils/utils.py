@@ -225,7 +225,7 @@ def assert_number_endpoints(host, expected, go=False):
 
 
 @debug_failures
-def assert_profile(host, profile_name, go=False):
+def assert_profile(host, profile_name):
     """
     Check that profile is registered in Calico
     Parse "calicoctl profile show" for the given profilename
@@ -234,24 +234,13 @@ def assert_profile(host, profile_name, go=False):
     :param profile_name: String of the name of the profile
     :return: Boolean: True if found, False if not found
     """
-    if go:
-        out = host.calicoctl("get -o yaml profile ", new=True)
-        output = yaml.safe_load(out)
-        found = False
-        for profile in output:
-            if profile['metadata']['name'] == profile_name:
-                found = True
-                break
-    else:
-        output = host.calicoctl("profile show")
-        lines = output.split("\n")
-        found = False
-
-        for line in lines:
-            columns = re.split("\s*\|\s*", line.strip())
-            if len(columns) > 1 and profile_name == columns[1]:
-                found = True
-                break
+    out = host.calicoctl("get -o yaml profile ", new=True)
+    output = yaml.safe_load(out)
+    found = False
+    for profile in output:
+        if profile['metadata']['name'] == profile_name:
+            found = True
+            break
 
     if not found:
         raise AssertionError("Profile %s not found in Calico" % profile_name)
