@@ -198,7 +198,7 @@ def assert_number_endpoints(host, expected):
     :return: None
     """
     hostname = host.get_hostname()
-    out = host.calicoctl("get workloadEndpoint -o yaml", new=True)
+    out = host.calicoctl("get workloadEndpoint -o yaml")
     output = yaml.safe_load(out)
     actual = 0
     for endpoint in output:
@@ -221,7 +221,7 @@ def assert_profile(host, profile_name):
     :param profile_name: String of the name of the profile
     :return: Boolean: True if found, False if not found
     """
-    out = host.calicoctl("get -o yaml profile ", new=True)
+    out = host.calicoctl("get -o yaml profile")
     output = yaml.safe_load(out)
     found = False
     for profile in output:
