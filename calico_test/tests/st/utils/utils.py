@@ -21,6 +21,7 @@ from subprocess import CalledProcessError
 from exceptions import CommandExecError
 import re
 import json
+import yaml
 from pycalico.util import get_host_ips
 
 LOCAL_IP_ENV = "MY_IP"
@@ -33,6 +34,7 @@ ETCD_CERT = os.environ.get("ETCD_CERT_FILE", "")
 ETCD_KEY = os.environ.get("ETCD_KEY_FILE", "")
 ETCD_HOSTNAME_SSL = "etcd-authority-ssl"
 
+
 def get_ip(v6=False):
     """
     Return a string of the IP of the hosts interface.
@@ -44,7 +46,7 @@ def get_ip(v6=False):
     ip = os.environ.get(env)
     if not ip:
         try:
-            # No env variable set; try to auto detect.
+            logger.debug("%s not set; try to auto detect IP.", env)
             socket_type = socket.AF_INET6 if v6 else socket.AF_INET
             s = socket.socket(socket_type, socket.SOCK_DGRAM)
             remote_ip = "2001:4860:4860::8888" if v6 else "8.8.8.8"
@@ -57,6 +59,8 @@ def get_ip(v6=False):
             ips = get_host_ips(version)
             if ips:
                 ip = str(ips[0])
+    else:
+        logger.debug("Got local IP from %s=%s", env, ip)
 
     return ip
 
@@ -107,19 +111,21 @@ def debug_failures(fn):
     :param fn: The function to decorate.
     :return: The decorated function.
     """
+
     def wrapped(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
         except KeyboardInterrupt:
             raise
         except Exception as e:
-            if (os.getenv("DEBUG_FAILURES") != None and
-                os.getenv("DEBUG_FAILURES").lower() == "true"):
+            if (os.getenv("DEBUG_FAILURES") is not None and
+                    os.getenv("DEBUG_FAILURES").lower() == "true"):
                 logger.error("TEST FAILED:\n%s\nEntering DEBUG mode."
                              % e.message)
                 pdb.set_trace()
             else:
                 raise e
+
     return wrapped
 
 
@@ -136,7 +142,7 @@ def check_bird_status(host, expected):
     the IP address of the peer, and state is the expected BGP state (e.g.
     "Established" or "Idle").
     """
-    output = host.calicoctl("status")
+    output = host.calicoctl("node status")
     lines = output.split("\n")
     for (peertype, ipaddr, state) in expected:
         for line in lines:
@@ -192,20 +198,18 @@ def assert_number_endpoints(host, expected):
     :return: None
     """
     hostname = host.get_hostname()
-    output = host.calicoctl("endpoint show")
-    lines = output.split("\n")
+    out = host.calicoctl("get workloadEndpoint -o yaml")
+    output = yaml.safe_load(out)
     actual = 0
-
-    for line in lines:
-        columns = re.split("\s*\|\s*", line.strip())
-        if len(columns) > 1 and columns[1] == hostname:
-                actual = columns[4]
-                break
+    for endpoint in output:
+        if endpoint['metadata']['node'] == hostname:
+            actual += 1
 
     if int(actual) != int(expected):
         msg = "Incorrect number of endpoints: \n" \
               "Expected: %s; Actual: %s" % (expected, actual)
         raise AssertionError(msg)
+
 
 @debug_failures
 def assert_profile(host, profile_name):
@@ -217,18 +221,17 @@ def assert_profile(host, profile_name):
     :param profile_name: String of the name of the profile
     :return: Boolean: True if found, False if not found
     """
-    output = host.calicoctl("profile show")
-    lines = output.split("\n")
+    out = host.calicoctl("get -o yaml profile")
+    output = yaml.safe_load(out)
     found = False
-
-    for line in lines:
-        columns = re.split("\s*\|\s*", line.strip())
-        if len(columns) > 1 and profile_name == columns[1]:
-                found = True
-                break
+    for profile in output:
+        if profile['metadata']['name'] == profile_name:
+            found = True
+            break
 
     if not found:
         raise AssertionError("Profile %s not found in Calico" % profile_name)
+
 
 def get_profile_name(host, network):
     """
@@ -246,6 +249,7 @@ def get_profile_name(host, network):
     # Network inspect returns a list of dicts for each network being inspected.
     # We are only inspecting 1, so use the first entry.
     return info[0]["Id"]
+
 
 @debug_failures
 def assert_network(host, network):

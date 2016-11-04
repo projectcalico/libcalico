@@ -18,12 +18,17 @@ from subprocess import CalledProcessError
 from functools import partial
 
 from utils import get_ip, log_and_run, retry_until_success, ETCD_SCHEME, \
-                  ETCD_CA, ETCD_KEY, ETCD_CERT, ETCD_HOSTNAME_SSL
+    ETCD_CA, ETCD_KEY, ETCD_CERT, ETCD_HOSTNAME_SSL
 from workload import Workload
 from network import DockerNetwork
 
 logger = logging.getLogger(__name__)
-CHECKOUT_DIR = os.getenv("HOST_CHECKOUT_DIR", os.getcwd())
+# We want to default CHECKOUT_DIR if either the ENV var is unset
+# OR its set to an empty string.
+CHECKOUT_DIR = os.getenv("HOST_CHECKOUT_DIR", "")
+if CHECKOUT_DIR == "":
+    CHECKOUT_DIR = os.getcwd()
+
 
 class DockerHost(object):
     """
@@ -31,12 +36,15 @@ class DockerHost(object):
     Calico.
 
     :param calico_node_autodetect_ip: When set to True, the test framework
-    will not perform IP detection, and will run `calicoctl node` without explicitly
-    passing in a value for --ip. This means calico-node will be forced to do its IP detection.
-    :param override_hostname: When set to True, the test framework will choose an alternate
-    hostname for the host which it will pass to all calicoctl components as the HOSTNAME
-    environment variable.  If set to False, the HOSTNAME environment is not explicitly set.
+    will not perform IP detection, and will run `calicoctl node` without
+    explicitly passing in a value for --ip. This means calico-node will be
+    forced to do its IP detection.
+    :param override_hostname: When set to True, the test framework will
+    choose an alternate hostname for the host which it will pass to all
+    calicoctl components as the HOSTNAME environment variable.  If set
+    to False, the HOSTNAME environment is not explicitly set.
     """
+
     def __init__(self, name, start_calico=True, dind=True,
                  additional_docker_options="",
                  post_docker_commands=["docker load -i /code/calico-node.tar",
@@ -48,16 +56,18 @@ class DockerHost(object):
         self.workloads = set()
         self.ip = None
         """
-        An IP address value to pass to calicoctl as `--ip`. If left as None, no value will be passed,
-        forcing calicoctl to do auto-detection.
+        An IP address value to pass to calicoctl as `--ip`. If left as None,
+        no value will be passed, forcing calicoctl to do auto-detection.
         """
 
         self.ip6 = None
         """
-        An IPv6 address value to pass to calicoctl as `--ipv6`. If left as None, no value will be passed.
+        An IPv6 address value to pass to calicoctl as `--ipv6`. If left as
+        None, no value will be passed.
         """
 
-        self.override_hostname = None if not override_hostname else uuid.uuid1().hex[:16]
+        self.override_hostname = None if not override_hostname else \
+            uuid.uuid1().hex[:16]
         """
         Create an arbitrary hostname if we want to override.
         """
@@ -78,15 +88,18 @@ class DockerHost(object):
             log_and_run("docker rm -f %s || true" % self.name)
             # Pass the certs directory as a volume since the etcd SSL/TLS
             # environment variables use the full path on the host.
-            # Set iptables=false to prevent iptables error when using dind libnetwork
+            # Set iptables=false to prevent iptables error when using dind
+            # libnetwork
             log_and_run("docker run %s "
                         "calico/dind:latest "
                         "--iptables=false "
                         "%s" %
-                    (docker_args, additional_docker_options))
+                        (docker_args, additional_docker_options))
 
-            self.ip = log_and_run("docker inspect --format "
-                              "'{{.NetworkSettings.Networks.bridge.IPAddress}}' %s" % self.name)
+            self.ip = log_and_run(
+                "docker inspect --format "
+                "'{{.NetworkSettings.Networks.bridge.IPAddress}}' %s" %
+                self.name)
 
             # Make sure docker is up
             docker_ps = partial(self.execute, "docker ps")
@@ -95,7 +108,8 @@ class DockerHost(object):
             for command in post_docker_commands:
                 self.execute(command)
         elif not calico_node_autodetect_ip:
-            # Find the IP so it can be specified as `--ip` when launching node later.
+            # Find the IP so it can be specified as `--ip` when launching
+            # node later.
             self.ip = get_ip(v6=False)
             self.ip6 = get_ip(v6=True)
 
@@ -119,7 +133,6 @@ class DockerHost(object):
                                                          command)
 
         return log_and_run(command)
-
 
     def calicoctl(self, command):
         """
@@ -150,9 +163,11 @@ class DockerHost(object):
                     "export ETCD_KEY_FILE=%s; %s" % \
                     (etcd_auth, ETCD_SCHEME, ETCD_CA, ETCD_CERT, ETCD_KEY,
                      calicoctl)
-        # If the hostname is being overriden, then export the HOSTNAME environment.
+        # If the hostname is being overriden, then export the HOSTNAME
+        # environment.
         if self.override_hostname:
-            calicoctl = "export HOSTNAME=%s; %s" % (self.override_hostname, calicoctl)
+            calicoctl = "export HOSTNAME=%s; %s" % (
+                self.override_hostname, calicoctl)
 
         return self.execute(calicoctl + " " + command)
 
@@ -160,11 +175,8 @@ class DockerHost(object):
         """
         Start calico in a container inside a host by calling through to the
         calicoctl node command.
-
-        :param as_num: The AS Number for this node.  A value of None uses the
-        inherited default value.
         """
-        args = ['node']
+        args = ['node', 'run']
         if self.ip:
             args.append('--ip=%s' % self.ip)
         if self.ip6:
@@ -208,7 +220,6 @@ class DockerHost(object):
                      "calico/node:latest" % (hostname_args,
                                              self.ip,
                                              etcd_auth, ETCD_SCHEME, ssl_args))
-
 
     def remove_workloads(self):
         """
@@ -353,7 +364,6 @@ class DockerHost(object):
         Note, this function only works with a host with dind enabled.
         Raises an exception if dind is not enabled.
 
-        :param host: DockerHost object
         :return: hostname of DockerHost
         """
         # If overriding the hostname, return that one.
@@ -362,3 +372,12 @@ class DockerHost(object):
 
         command = "docker inspect --format {{.Config.Hostname}} %s" % self.name
         return log_and_run(command)
+
+    def writefile(self, filename, data):
+        """
+        Writes a file on a host (e.g. a yaml file for loading into calicoctl).
+        :param filename: string, the filename to create
+        :param data: string, the data to put inthe file
+        :return: Return code of execute operation.
+        """
+        return self.execute("cat << EOF > %s\n%s" % (filename, data))
