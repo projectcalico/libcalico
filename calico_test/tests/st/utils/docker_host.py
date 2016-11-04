@@ -135,7 +135,7 @@ class DockerHost(object):
 
         return log_and_run(command)
 
-    def calicoctl(self, command, new=False):
+    def calicoctl(self, command):
         """
         Convenience function for abstracting away calling the calicoctl
         command.
@@ -147,11 +147,7 @@ class DockerHost(object):
         :return: The output from the command with leading and trailing
         whitespace removed.
         """
-        if new:
-            calicoctl = os.environ.get(
-                "NEWCALICOCTL", "/code/dist/calicoctl.go")
-        else:
-            calicoctl = os.environ.get("CALICOCTL", "/code/dist/calicoctl")
+        calicoctl = os.environ.get("CALICOCTL", "/code/dist/calicoctl")
 
         if ETCD_SCHEME == "https":
             etcd_auth = "%s:2379" % ETCD_HOSTNAME_SSL
@@ -181,7 +177,7 @@ class DockerHost(object):
         Start calico in a container inside a host by calling through to the
         calicoctl node command.
         """
-        args = ['node']
+        args = ['node', 'run']
         if self.ip:
             args.append('--ip=%s' % self.ip)
         if self.ip6:
@@ -189,7 +185,7 @@ class DockerHost(object):
         args.append(options)
 
         cmd = ' '.join(args)
-        self.calicoctl(cmd, new=False)
+        self.calicoctl(cmd)
 
     def start_calico_node_with_docker(self):
         """

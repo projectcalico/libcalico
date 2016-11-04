@@ -161,11 +161,11 @@ class TestBase(TestCase):
     def check_data_in_datastore(self, host, data, resource, yaml_format=True):
         if yaml_format:
             out = host.calicoctl(
-                "get %s --output=yaml" % resource, new=True)
+                "get %s --output=yaml" % resource)
             output = yaml.safe_load(out)
         else:
             out = host.calicoctl(
-                "get %s --output=json" % resource, new=True)
+                "get %s --output=json" % resource)
             output = json.loads(out)
         self.assert_same(data, output)
 
