@@ -95,10 +95,6 @@ class Workload(object):
             "-c", "1",  # Number of pings
             "-W", "1",  # Timeout for each ping
             ip,
-            # "hping",
-            # "-1",      # icmp mode
-            # ip,
-            # "-c", "1"  # just once
          ]
         command = ' '.join(args)
 
@@ -166,19 +162,8 @@ class Workload(object):
         """
         # test_string = "hello"
         args = [
-            # "echo", test_string, "|",  # send data to responder
-            # "nc", "-w1",  # Timeout after 1 second
-            # ip,
-            # "80",  # Responder is listening on port 80
-            # "|", "grep", test_string  # Check that we get a response
-
             "/code/tcpping.sh",
             ip,
-
-            # "hping",
-            # ip,
-            # "-p", "80",  # port 80
-            # "-c", "1"  # just once
         ]
 
         command = ' '.join(args)
@@ -249,23 +234,9 @@ class Workload(object):
         The function raises a CommandExecError exception if the check fails,
         or returns the output of the check.
         """
-        # test_string = "hello"
         args = [
-            # "echo", test_string, "|",  # send data to responder
-            # "nc", "-u",  # Use udp
-            # "-w1",  # Timeout after 1 second
-            # ip,
-            # "69",  # Responder is listening on port 69
-            # "|", "grep", test_string  # Check that we get a response
-
             "/code/udpping.sh",
             ip,
-
-            # "hping",
-            # "-2",  # udp mode
-            # ip,
-            # "-p", "69",  # port 69
-            # "-c", "1"  # just once
         ]
 
         command = ' '.join(args)

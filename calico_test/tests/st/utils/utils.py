@@ -118,8 +118,8 @@ def debug_failures(fn):
         except KeyboardInterrupt:
             raise
         except Exception as e:
-            if (os.getenv("DEBUG_FAILURES") is not None and os.getenv(
-                    "DEBUG_FAILURES").lower() == "true"):
+            if (os.getenv("DEBUG_FAILURES") is not None and
+                    os.getenv("DEBUG_FAILURES").lower() == "true"):
                 logger.error("TEST FAILED:\n%s\nEntering DEBUG mode."
                              % e.message)
                 pdb.set_trace()
@@ -142,7 +142,7 @@ def check_bird_status(host, expected):
     the IP address of the peer, and state is the expected BGP state (e.g.
     "Established" or "Idle").
     """
-    output = host.calicoctl("status")
+    output = host.calicoctl("node status")
     lines = output.split("\n")
     for (peertype, ipaddr, state) in expected:
         for line in lines:
