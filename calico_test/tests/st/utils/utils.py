@@ -186,7 +186,7 @@ def check_bird_status(host, expected):
 
 
 @debug_failures
-def assert_number_endpoints(host, expected, go=False):
+def assert_number_endpoints(host, expected):
     """
     Check that a host has the expected number of endpoints in Calico
     Parses the "calicoctl endpoint show" command for number of endpoints.
@@ -195,28 +195,15 @@ def assert_number_endpoints(host, expected, go=False):
 
     :param host: DockerHost object
     :param expected: int, number of expected endpoints
-    :param go: boolean - whether to use the golang calicoctl or not.
     :return: None
     """
     hostname = host.get_hostname()
-    if go:
-        out = host.calicoctl("get workloadEndpoint -o yaml", new=True)
-        output = yaml.safe_load(out)
-        actual = 0
-        for endpoint in output:
-            if endpoint['metadata']['node'] == hostname:
-                actual += 1
-
-    else:
-        output = host.calicoctl("endpoint show")
-        lines = output.split("\n")
-        actual = 0
-
-        for line in lines:
-            columns = re.split("\s*\|\s*", line.strip())
-            if len(columns) > 1 and columns[1] == hostname:
-                actual = columns[4]
-                break
+    out = host.calicoctl("get workloadEndpoint -o yaml", new=True)
+    output = yaml.safe_load(out)
+    actual = 0
+    for endpoint in output:
+        if endpoint['metadata']['node'] == hostname:
+            actual += 1
 
     if int(actual) != int(expected):
         msg = "Incorrect number of endpoints: \n" \
