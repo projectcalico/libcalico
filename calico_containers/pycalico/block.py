@@ -147,7 +147,7 @@ class AllocationBlock(object):
         # Parse out the host.  For now, it's in the form host:<host id>.  An
         # empty host ID is converted to None to indicate the block has no
         # specific host affinity.
-        affinity = json_dict[AllocationBlock.AFFINITY]
+        affinity = json_dict.get(AllocationBlock.AFFINITY)
         if not affinity:
             host_affinity = None
         else:
