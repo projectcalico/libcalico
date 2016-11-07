@@ -102,7 +102,7 @@ class Workload(object):
         return ping
 
     @debug_failures
-    def assert_can_ping(self, ip, retries=0):
+    def check_can_ping(self, ip, retries=0):
         """
         Execute a ping from this workload to the ip. Assert than a workload
         can ping an IP. Use retries to allow for convergence.
@@ -119,10 +119,12 @@ class Workload(object):
                                 retries=retries,
                                 ex_class=CommandExecError)
         except CommandExecError:
-            raise AssertionError("%s cannot ping %s" % (self, ip))
+            return False
+
+        return True
 
     @debug_failures
-    def assert_cant_ping(self, ip, retries=0):
+    def check_cant_ping(self, ip, retries=0):
         """
         Execute a ping from this workload to the ip.  Assert that the workload
         cannot ping an IP.  Use retries to allow for convergence.
@@ -149,7 +151,9 @@ class Workload(object):
                                 retries=retries,
                                 ex_class=_PingError)
         except _PingError:
-            raise AssertionError("%s can ping %s" % (self, ip))
+            return False
+
+        return True
 
     def _get_tcp_function(self, ip):
         """
@@ -172,7 +176,7 @@ class Workload(object):
         return tcp_check
 
     @debug_failures
-    def assert_can_tcp(self, ip, retries=0):
+    def check_can_tcp(self, ip, retries=0):
         """
         Execute a tcp check from this ip to the other ip.
         Assert that a ip can connect to another ip.
@@ -190,11 +194,12 @@ class Workload(object):
                                 retries=retries,
                                 ex_class=CommandExecError)
         except CommandExecError:
-            raise AssertionError("%s cannot connect with tcp to %s" %
-                                 (self, ip))
+            return False
+
+        return True
 
     @debug_failures
-    def assert_cant_tcp(self, ip, retries=0):
+    def check_cant_tcp(self, ip, retries=0):
         """
         Execute a ping from this workload to an ip.
         Assert that the workload cannot connect to an IP using tcp.
@@ -222,8 +227,9 @@ class Workload(object):
                                 retries=retries,
                                 ex_class=_PingError)
         except _PingError:
-            raise AssertionError("%s can connect with tcp to %s" %
-                                 (self, ip))
+            return False
+
+        return True
 
     def _get_udp_function(self, ip):
         """
@@ -245,7 +251,7 @@ class Workload(object):
         return udp_check
 
     @debug_failures
-    def assert_can_udp(self, ip, retries=0):
+    def check_can_udp(self, ip, retries=0):
         """
         Execute a udp check from this workload to an ip.
         Assert that this workload can connect to another ip.
@@ -263,11 +269,11 @@ class Workload(object):
                                 retries=retries,
                                 ex_class=CommandExecError)
         except CommandExecError:
-            raise AssertionError("%s cannot connect with udp to %s" %
-                                 (self, ip))
+            return False
+        return True
 
     @debug_failures
-    def assert_cant_udp(self, ip, retries=0):
+    def check_cant_udp(self, ip, retries=0):
         """
         Execute a udp check from this workload to the ip.  Assert that
         the workload cannot connect via udp to an IP.
@@ -295,8 +301,9 @@ class Workload(object):
                                 retries=retries,
                                 ex_class=_PingError)
         except _PingError:
-            raise AssertionError("%s can connect with udp to %s" %
-                                 (self, ip))
+            return False
+
+        return True
 
     def __str__(self):
         return self.name

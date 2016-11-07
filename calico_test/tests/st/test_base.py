@@ -19,6 +19,7 @@ from pprint import pformat
 from unittest import TestCase
 
 from deepdiff import DeepDiff
+from multiprocessing.dummy import Pool as ThreadPool
 
 from tests.st.utils.utils import (get_ip, ETCD_SCHEME, ETCD_CA, ETCD_CERT,
                                   ETCD_KEY, debug_failures, ETCD_HOSTNAME_SSL)
@@ -57,6 +58,27 @@ class TestBase(TestCase):
         # Log a newline to ensure that the first log appears on its own line.
         logger.info("")
 
+    @staticmethod
+    def _conn_checker(args):
+        source, dest, test_type, result, retries = args
+        if test_type == 'icmp':
+            if result:
+                return source.check_can_ping(dest, retries)
+            else:
+                return source.check_cant_ping(dest, retries)
+        elif test_type == 'tcp':
+            if result:
+                return source.check_can_tcp(dest, retries)
+            else:
+                return source.check_cant_tcp(dest, retries)
+        elif test_type == 'udp':
+            if result:
+                return source.check_can_udp(dest, retries)
+            else:
+                return source.check_cant_udp(dest, retries)
+        else:
+            logger.error("Unrecognised connectivity check test_type")
+
     @debug_failures
     def assert_connectivity(self, pass_list, fail_list=None, retries=0,
                             type_list=None):
@@ -77,21 +99,50 @@ class TestBase(TestCase):
         if fail_list is None:
             fail_list = []
 
+        conn_check_list = []
         for source in pass_list:
             for dest in pass_list:
                 if 'icmp' in type_list:
-                    source.assert_can_ping(dest.ip, retries)
+                    conn_check_list.append((source, dest.ip, 'icmp', True, retries))
                 if 'tcp' in type_list:
-                    source.assert_can_tcp(dest.ip, retries)
+                    conn_check_list.append((source, dest.ip, 'tcp', True, retries))
                 if 'udp' in type_list:
-                    source.assert_can_udp(dest.ip, retries)
+                    conn_check_list.append((source, dest.ip, 'udp', True, retries))
             for dest in fail_list:
                 if 'icmp' in type_list:
-                    source.assert_cant_ping(dest.ip, retries)
+                    conn_check_list.append((source, dest.ip, 'icmp', False, retries))
                 if 'tcp' in type_list:
-                    source.assert_cant_tcp(dest.ip, retries)
+                    conn_check_list.append((source, dest.ip, 'tcp', False, retries))
                 if 'udp' in type_list:
-                    source.assert_cant_udp(dest.ip, retries)
+                    conn_check_list.append((source, dest.ip, 'udp', False, retries))
+
+        # Empirically, 18 threads works well on my machine!
+        check_pool = ThreadPool(18)
+        results = check_pool.map(self._conn_checker, conn_check_list)
+        check_pool.close()
+        check_pool.join()
+        # _con_checker should only return None if there is an error in calling it
+        assert None not in results, ("_con_checker error - returned None")
+        diagstring = ""
+        # Check that all tests passed
+        if False in results:
+            # We've failed, lets put together some diags.
+            header = ["source.ip", "dest.ip", "type", "exp_result", "pass/fail"]
+            diagstring = "{: >18} {: >18} {: >7} {: >6} {: >6}\r\n".format(*header)
+            for i in range(len(conn_check_list)):
+                source, dest, test_type, exp_result, retries = conn_check_list[i]
+                pass_fail = results[i]
+                # Convert pass/fail into an actual result
+                if not pass_fail:
+                    actual_result = not exp_result
+                else:
+                    actual_result = exp_result
+                diag = [source.ip, dest, test_type, exp_result, actual_result]
+                diagline = "{: >18} {: >18} {: >7} {: >6} {: >6}\r\n".format(*diag)
+                diagstring += diagline
+
+        assert False not in results, ("Connectivity check error!\r\n"
+                                      "Results:\r\n %s\r\n" % diagstring)
 
     @debug_failures
     def assert_ip_connectivity(self, workload_list, ip_pass_list,
@@ -112,25 +163,55 @@ class TestBase(TestCase):
         icmp only.
         """
         if type_list is None:
-            type_list = ['icmp']
+            type_list = ['icmp', 'tcp', 'udp']
         if ip_fail_list is None:
             ip_fail_list = []
+
+        conn_check_list = []
         for workload in workload_list:
             for ip in ip_pass_list:
                 if 'icmp' in type_list:
-                    workload.assert_can_ping(ip)
+                    conn_check_list.append((workload, ip, 'icmp', True, 0))
                 if 'tcp' in type_list:
-                    workload.assert_can_tcp(ip)
+                    conn_check_list.append((workload, ip, 'tcp', True, 0))
                 if 'udp' in type_list:
-                    workload.assert_can_udp(ip)
+                    conn_check_list.append((workload, ip, 'udp', True, 0))
 
             for ip in ip_fail_list:
                 if 'icmp' in type_list:
-                    workload.assert_cant_ping(ip)
+                    conn_check_list.append((workload, ip, 'icmp', False, 0))
                 if 'tcp' in type_list:
-                    workload.assert_cant_tcp(ip)
+                    conn_check_list.append((workload, ip, 'tcp', False, 0))
                 if 'udp' in type_list:
-                    workload.assert_cant_udp(ip)
+                    conn_check_list.append((workload, ip, 'udp', False, 0))
+
+        # Empirically, 18 threads works well on my machine!
+        check_pool = ThreadPool(18)
+        results = check_pool.map(self._conn_checker, conn_check_list)
+        check_pool.close()
+        check_pool.join()
+        # _con_checker should only return None if there is an error in calling it
+        assert None not in results, ("_con_checker error - returned None")
+        diagstring = ""
+        # Check that all tests passed
+        if False in results:
+            # We've failed, lets put together some diags.
+            header = ["source.ip", "dest.ip", "type", "exp_result", "actual_result"]
+            diagstring = "{: >18} {: >18} {: >7} {: >6} {: >6}\r\n".format(*header)
+            for i in range(len(conn_check_list)):
+                source, dest, test_type, exp_result, retries = conn_check_list[i]
+                pass_fail = results[i]
+                # Convert pass/fail into an actual result
+                if not pass_fail:
+                    actual_result = not exp_result
+                else:
+                    actual_result = exp_result
+                diag = [source.ip, dest, test_type, exp_result, actual_result]
+                diagline = "{: >18} {: >18} {: >7} {: >6} {: >6}\r\n".format(*diag)
+                diagstring += diagline
+
+        assert False not in results, ("Connectivity check error!\r\n"
+                                      "Results:\r\n %s\r\n" % diagstring)
 
     def curl_etcd(self, path, options=None, recursive=True):
         """
