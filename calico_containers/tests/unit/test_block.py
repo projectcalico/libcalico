@@ -206,6 +206,52 @@ class TestAllocationBlock(unittest.TestCase):
         self.assertRaises(AssertionError,
                           AllocationBlock.from_etcd_result, result)
 
+    def test_from_etcd_result_no_affinity(self):
+        """
+        Mainline test of from_etcd_result()
+        """
+
+        result = Mock(spec=EtcdResult)
+
+        # Build a JSON object for the Block.  Assume the strict_affinity flag is
+        # not present so that we default the value (to False).
+        attr0 = {
+            AllocationBlock.ATTR_HANDLE_ID: "test_key1",
+            AllocationBlock.ATTR_SECONDARY: {
+                "key1": "value11",
+                "key2": "value21"
+            }
+        }
+        attr1 = {
+            AllocationBlock.ATTR_HANDLE_ID: "test_key2",
+            AllocationBlock.ATTR_SECONDARY: {
+                "key1": "value12",
+                "key2": "value22"
+            }
+        }
+        allocations = [None] * BLOCK_SIZE
+        allocations[0] = 0
+        allocations[1] = 0
+        allocations[2] = 1
+        unallocated = list(range(3, BLOCK_SIZE))
+        json_dict = {
+            AllocationBlock.CIDR: str(network),
+            AllocationBlock.ALLOCATIONS: allocations,
+            AllocationBlock.ATTRIBUTES: [attr0, attr1],
+            AllocationBlock.UNALLOCATED: unallocated
+        }
+        result.value = json.dumps(json_dict)
+
+        block = AllocationBlock.from_etcd_result(result)
+        assert_equal(block.count_free_addresses(), BLOCK_SIZE - 3)
+        assert_equal(block.db_result, result)
+        assert_equal(block.cidr, network)
+        assert_is_none(block.host_affinity)
+        assert_false(block.strict_affinity)
+        assert_list_equal(block.allocations[:3], [0, 0, 1])
+        assert_dict_equal(block.attributes[0], attr0)
+        assert_dict_equal(block.attributes[1], attr1)
+
     def test_update_result_from_pre_unallocated(self):
         """
         Test mainline update_result() processing.
