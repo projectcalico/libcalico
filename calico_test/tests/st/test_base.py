@@ -163,7 +163,7 @@ class TestBase(TestCase):
         icmp only.
         """
         if type_list is None:
-            type_list = ['icmp', 'tcp', 'udp']
+            type_list = ['icmp']
         if ip_fail_list is None:
             ip_fail_list = []
 
@@ -286,3 +286,17 @@ class TestBase(TestCase):
                               separators=(',', ': '))
             logger.debug("Writing %s: \n%s" % (filename, text))
             f.write(text)
+
+    @debug_failures
+    def assert_false(self, b):
+        """
+        Assert false, wrapped to allow debugging of failures.
+        """
+        assert not b
+
+    @debug_failures
+    def assert_true(self, b):
+        """
+        Assert true, wrapped to allow debugging of failures.
+        """
+        assert b

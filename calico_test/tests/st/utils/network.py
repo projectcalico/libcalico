@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
+from tests.st.utils.exceptions import CommandExecError
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +25,11 @@ class DockerNetwork(object):
     by containers).
     """
 
-    def __init__(self, host, name, driver="calico", ipam_driver=None,
+    def __init__(self, host, name, driver="calico", ipam_driver="calico-ipam",
                  subnet=None):
         """
         Create the network.
-        :param host: The Docker Host which creates the network (note that
-        networks
+        :param host: The Docker Host which creates the network
         :param name: The name of the network.  This must be unique per cluster
         and is the user-facing identifier for the network.  (Calico itself will
         get a UUID for the network via the driver API and will not get the
@@ -43,27 +43,40 @@ class DockerNetwork(object):
         """
         self.name = name
         self.driver = driver
+        self.deleted = False
 
         self.init_host = host
         """The host which created the network."""
 
+        driver_option = ("--driver %s" % driver) if driver else ""
         ipam_option = ("--ipam-driver %s" % ipam_driver) if ipam_driver else ""
         subnet_option = ("--subnet %s" % subnet) if subnet else ""
 
-        cmd = "docker network create -d %s %s %s %s" % \
-              (driver, ipam_option, subnet_option, name)
-        self.uuid = host.execute(cmd)
+        # Create the network, if this fails - attempt deletion and then
+        # try again.
+        cmd = "docker network create %s %s %s %s" % \
+              (driver_option, ipam_option, subnet_option, name)
+        try:
+            self.uuid = host.execute(cmd)
+        except CommandExecError:
+            host.execute("docker network rm " + name)
+            self.uuid = host.execute(cmd)
 
-    def delete(self):
+    def delete(self, host=None):
         """
         Delete the network.
+        :param host: The Docker Host to use when deleting the network.  If
+        not specified, defaults to the host used to create the network.
         :return: Nothing
         """
-        self.init_host.execute("docker network rm " + self.name)
+        if not self.deleted:
+            host = host or self.init_host
+            host.execute("docker network rm " + self.name)
+            self.deleted = True
 
     def disconnect(self, host, container):
         """
-        Disconnect container from network
+        Disconnect container from network.
         :return: Nothing
         """
         host.execute("docker network disconnect %s %s" %
