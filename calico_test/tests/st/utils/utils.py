@@ -167,6 +167,9 @@ def check_bird_status(host, expected):
             if len(columns) != 7:
                 continue
 
+            if type(state) is not list:
+                state = [state]
+
             # Find the entry matching this peer.
             if columns[1] == ipaddr and columns[2] == peertype:
 
@@ -174,7 +177,7 @@ def check_bird_status(host, expected):
                 # that the state starts with the expected value since there
                 # may be additional diagnostic information included in the
                 # info field.
-                if columns[5].startswith(state):
+                if any(columns[5].startswith(s) for s in state):
                     break
                 else:
                     msg = "Error in BIRD status for peer %s:\n" \
