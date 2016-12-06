@@ -74,8 +74,8 @@ BGP_CUSTOM_FILTERS_PATH = BGP_GLOBAL_PATH + "/custom_filters/"
 BGP_CUSTOM_FILTERS_IPV4_PATH = BGP_CUSTOM_FILTERS_PATH + "v4/"
 BGP_CUSTOM_FILTERS_IPV6_PATH = BGP_CUSTOM_FILTERS_PATH + "v6/"
 
-IPAM_V4_PATH = "/calico/ipam/v2/host/THIS_HOST/ipv4/block/"
-IPAM_V6_PATH = "/calico/ipam/v2/host/THIS_HOST/ipv6/block/"
+IPAM_V4_PATH = "/calico/ipam/v2/host/TEST_HOST/ipv4/block/"
+IPAM_V6_PATH = "/calico/ipam/v2/host/TEST_HOST/ipv6/block/"
 
 # 4 endpoints, with 2 TEST profile and 2 UNIT profile.
 EP_56 = Endpoint(TEST_HOST, "docker", TEST_CONT_ID, "567890abcdef",
@@ -590,9 +590,7 @@ class TestDatastoreClient(unittest.TestCase):
         self.etcd_client.read.assert_has_calls(expected_reads)
 
         expected_writes = [call(int_prefix_path, "cali"),
-                           call(IPAM_V4_PATH, None, dir=True),
                            call(IPV4_POOLS_PATH, None, dir=True),
-                           call(IPAM_V6_PATH, None, dir=True),
                            call(IPV6_POOLS_PATH, None, dir=True),
                            call(BGP_CUSTOM_FILTERS_IPV4_PATH, None, dir=True),
                            call(BGP_CUSTOM_FILTERS_IPV6_PATH, None, dir=True),
@@ -633,9 +631,7 @@ class TestDatastoreClient(unittest.TestCase):
         self.datastore.ensure_global_config()
 
         expected_writes = [call(int_prefix_path, "cali"),
-                           call(IPAM_V4_PATH, None, dir=True),
                            call(IPV4_POOLS_PATH, None, dir=True),
-                           call(IPAM_V6_PATH, None, dir=True),
                            call(IPV6_POOLS_PATH, None, dir=True),
                            call(BGP_CUSTOM_FILTERS_IPV4_PATH, None, dir=True),
                            call(BGP_CUSTOM_FILTERS_IPV6_PATH, None, dir=True),
@@ -969,11 +965,13 @@ class TestDatastoreClient(unittest.TestCase):
                            call(TEST_BGP_HOST_IPV4_PATH, ipv4),
                            call(TEST_BGP_HOST_IPV6_PATH, ipv6),
                            call(TEST_BGP_HOST_AS_PATH, bgp_as),
+                           call(IPAM_V4_PATH, None, dir=True),
+                           call(IPAM_V6_PATH, None, dir=True),
                            call(TEST_HOST_PATH + "/config/marker",
                                 "created")]
         self.etcd_client.write.assert_has_calls(expected_writes,
                                                 any_order=True)
-        assert_equal(self.etcd_client.write.call_count, 5)
+        assert_equal(self.etcd_client.write.call_count, 7)
 
     def test_create_host_mainline(self):
         """
@@ -999,6 +997,8 @@ class TestDatastoreClient(unittest.TestCase):
         expected_writes = [call(TEST_HOST_IPV4_PATH, ipv4),
                            call(TEST_BGP_HOST_IPV4_PATH, ipv4),
                            call(TEST_BGP_HOST_IPV6_PATH, ipv6),
+                           call(IPAM_V4_PATH, None, dir=True),
+                           call(IPAM_V6_PATH, None, dir=True),
                            call(TEST_HOST_PATH +
                                 "/config/DefaultEndpointToHostAction",
                                 "RETURN"),
@@ -1008,7 +1008,7 @@ class TestDatastoreClient(unittest.TestCase):
                                 None, dir=True)]
         self.etcd_client.write.assert_has_calls(expected_writes,
                                                 any_order=True)
-        assert_equal(self.etcd_client.write.call_count, 6)
+        assert_equal(self.etcd_client.write.call_count, 8)
 
     def test_get_per_host_config_mainline(self):
         value = self.datastore.get_per_host_config("hostname", "SomeConfig")

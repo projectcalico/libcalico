@@ -268,12 +268,8 @@ class DatastoreClient(object):
 
         # Configure IPAM directory structures (to ensure confd is able to
         # watch appropriate directory trees).
-        host = get_hostname()
         for version in (4, 6):
-            affinity_path = IPAM_HOST_AFFINITY_PATH % {"host": host,
-                                                       "version": version}
             pool_path = IP_POOLS_PATH % {"version": version}
-            self._write_global_dir(affinity_path)
             self._write_global_dir(pool_path)
 
         # create directories for custom filters
@@ -372,6 +368,12 @@ class DatastoreClient(object):
         bgp_ipv4 = BGP_HOST_IPV4_PATH % {"hostname": hostname}
         bgp_ipv6 = BGP_HOST_IPV6_PATH % {"hostname": hostname}
         bgp_as = BGP_HOST_AS_PATH % {"hostname": hostname}
+
+        # Create the per-host affinity paths.
+        for version in (4, 6):
+            affinity_path = IPAM_HOST_AFFINITY_PATH % {"host": hostname,
+                                                       "version": version}
+            self._write_global_dir(affinity_path)
 
         # Set up the host
         self.etcd_client.write(host_ipv4, ipv4)
