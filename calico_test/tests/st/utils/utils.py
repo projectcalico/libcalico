@@ -129,7 +129,7 @@ def debug_failures(fn):
                              % e.message)
                 pdb.set_trace()
             else:
-                raise e
+                raise
 
     return wrapped
 
