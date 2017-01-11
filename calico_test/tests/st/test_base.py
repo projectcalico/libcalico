@@ -21,7 +21,8 @@ from unittest import TestCase
 from deepdiff import DeepDiff
 from multiprocessing.dummy import Pool as ThreadPool
 
-from tests.st.utils.utils import (get_ip, ETCD_SCHEME, ETCD_CA, ETCD_CERT,
+from exceptions import CommandExecError
+from tests.st.utils.utils import (TestWithHooks, get_ip, ETCD_SCHEME, ETCD_CA, ETCD_CERT,
                                   ETCD_KEY, debug_failures, ETCD_HOSTNAME_SSL)
 
 HOST_IPV6 = get_ip(v6=True)
@@ -35,24 +36,26 @@ sh_logger = logging.getLogger("sh")
 sh_logger.setLevel(level=logging.CRITICAL)
 
 
-class TestBase(TestCase):
+class TestBase(TestWithHooks):
     """
     Base class for test-wide methods.
     """
 
-    def setUp(self):
+    @classmethod
+    def setUpClass(cls):
         """
-        Clean up before every test.
+        Clean up before every testrun.
         """
-        self.ip = HOST_IPV4
+        logger.debug("Cleaning up at start of testrun")
+        cls.ip = HOST_IPV4
 
         # Delete /calico if it exists. This ensures each test has an empty data
         # store at start of day.
-        self.curl_etcd("calico", options=["-XDELETE"])
+        cls.curl_etcd("calico", options=["-XDELETE"])
 
         # Disable Usage Reporting to usage.projectcalico.org
         # We want to avoid polluting analytics data with unit test noise
-        self.curl_etcd("calico/v1/config/UsageReportingEnabled",
+        cls.curl_etcd("calico/v1/config/UsageReportingEnabled",
                        options=["-XPUT -d value=False"])
 
         # Log a newline to ensure that the first log appears on its own line.
@@ -213,7 +216,8 @@ class TestBase(TestCase):
         assert False not in results, ("Connectivity check error!\r\n"
                                       "Results:\r\n %s\r\n" % diagstring)
 
-    def curl_etcd(self, path, options=None, recursive=True):
+    @staticmethod
+    def curl_etcd(path, options=None, recursive=True):
         """
         Perform a curl to etcd, returning JSON decoded response.
         :param path:  The key path to query
@@ -234,7 +238,7 @@ class TestBase(TestCase):
         else:
             rc = subprocess.check_output(
                 "curl -sL http://%s:2379/v2/keys/%s?recursive=%s %s"
-                % (self.ip, path, str(recursive).lower(), " ".join(options)),
+                % (HOST_IPV4, path, str(recursive).lower(), " ".join(options)),
                 shell=True)
 
         return json.loads(rc.strip())
@@ -300,3 +304,30 @@ class TestBase(TestCase):
         Assert true, wrapped to allow debugging of failures.
         """
         assert b
+
+    @classmethod
+    def get_diags(cls):
+        logfiles = [
+            "/var/log/calico/bird/current",
+            "/var/log/calico/bird6/current",
+            "/var/log/calico/confd/current",
+            "/var/log/calico/felix/current",
+            "/var/log/calico/libnetwork/current",
+        ]
+        if cls.hosts:
+            for host in cls.hosts:
+                if host.dind:
+                    try:
+                        logger.debug("Docker logs from %s (%s):\r\n%s",
+                                     host.name,
+                                     host.ip,
+                                     host.execute("docker logs calico-node"))
+                    except CommandExecError:
+                        logger.info("Error getting docker logs from calico-node")
+                for logfile in logfiles:
+                    try:
+                        host.execute("cat %s" % logfile)
+                    except CommandExecError:
+                        logger.info("*" * 80)
+                        logger.info("Getting logs from %s", logfile)
+                        logger.info("Error getting %s", logfile)

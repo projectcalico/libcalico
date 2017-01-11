@@ -11,14 +11,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import functools
 import logging
 import socket
+import sys
+import time
+import unittest
 from time import sleep
 import os
 import pdb
 from subprocess import check_output, STDOUT
 from subprocess import CalledProcessError
 from exceptions import CommandExecError
+from unittest.case import SkipTest
 import re
 import json
 import yaml
@@ -33,6 +38,102 @@ ETCD_CA = os.environ.get("ETCD_CA_CERT_FILE", "")
 ETCD_CERT = os.environ.get("ETCD_CERT_FILE", "")
 ETCD_KEY = os.environ.get("ETCD_KEY_FILE", "")
 ETCD_HOSTNAME_SSL = "etcd-authority-ssl"
+firstlogger_time = None
+
+
+def log_banner(msg, *args, **kwargs):
+    # Calculate elapsed hours, minutes and seconds since first log.
+    global firstlogger_time
+    time_now = time.time()
+    if not firstlogger_time:
+        firstlogger_time = time_now
+    time_now -= firstlogger_time
+    elapsed_hms = "%02d:%02d:%02d " % (time_now / 3600,
+                                       (time_now % 3600) / 60,
+                                       time_now % 60)
+
+    level = kwargs.pop("level", logging.INFO)
+    msg = elapsed_hms + str(msg) % args
+    banner = "+" + ("-" * (len(msg) + 2)) + "+"
+    logger.log(level, "\n" +
+               banner + "\n"
+                        "| " + msg + " |\n" +
+               banner)
+
+
+def decorate_with_hooks(test_method):
+    """
+    Wraps each test_method with calls to the test hooks.
+    """
+
+    @functools.wraps(test_method)
+    def call_test_hooks(self):
+        """
+        Calls the test_method. If the test fails or succeeds, runs the
+        on_failure hook or the on_success hook defined in the test class.
+        """
+        try:
+            log_banner("TEST STARTING: %s", self.id())
+            test_method(self)
+        except KeyboardInterrupt:
+            log_banner("TEST INTERRUPTED: %s", self.id(),
+                       level=logging.WARNING)
+            raise
+        except SkipTest:
+            log_banner("TEST SKIPPED: %s", self.id())
+            raise
+        except Exception as e:
+            e_trace = sys.exc_info()[2]
+            logger.exception("Test %s failed with exception", self.id())
+            log_banner("TEST FAILED: %s", self.id(),
+                       level=logging.ERROR)
+            self.on_failure(test_id=self.id())
+            raise e, None, e_trace
+        else:
+            log_banner("TEST SUCCEEDED: %s", self.id())
+            self.on_success()
+        finally:
+            log_banner("TEST CLEAN-UP DONE: %s", self.id())
+
+    return call_test_hooks
+
+
+class ResultsWithHooks(type):
+    """
+    Metaclass that decorates all test_* class methods with decorate_with_hooks.
+    """
+    def __new__(cls, name, bases, dct):
+        for attr, value in dct.iteritems():
+            if attr.startswith("test_") and hasattr(value, '__module__'):
+                dct[attr] = decorate_with_hooks(value)
+        return super(ResultsWithHooks, cls).__new__(cls, name, bases, dct)
+
+
+class TestWithHooks(unittest.TestCase):
+    """
+    Base unittest class implementing success and failure hooks.
+    """
+
+    __metaclass__ = ResultsWithHooks
+
+    @classmethod
+    def on_success(cls):
+        """
+        The test completed without raising an exception.
+        """
+        logger.info("Test succeeded")
+
+    @classmethod
+    def on_failure(cls, test_id=None):
+        """
+        The test raised an exception.
+        """
+        cls.get_diags()
+        logger.info("Test failed.")
+
+    @classmethod
+    def get_diags(cls):
+        logger.debug("You should be overriding get_diags!")
 
 
 def get_ip(v6=False):
