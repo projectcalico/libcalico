@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
+from functools import partial
 from tests.st.utils.exceptions import CommandExecError
+from tests.st.utils.utils import retry_until_success
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +58,9 @@ class DockerNetwork(object):
         # try again.
         cmd = "docker network create %s %s %s %s" % \
               (driver_option, ipam_option, subnet_option, name)
+        docker_net_create = partial(host.execute, cmd)
         try:
-            self.uuid = host.execute(cmd)
+            self.uuid = retry_until_success(docker_net_create)
         except CommandExecError:
             host.execute("docker network rm " + name)
             self.uuid = host.execute(cmd)

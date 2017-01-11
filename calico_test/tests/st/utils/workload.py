@@ -54,7 +54,8 @@ class Workload(object):
         ip_option = ("--ip %s" % ip) if ip else ""
         command = "docker run -tid --name %s --net %s %s %s" % \
                   (name, network, ip_option, image)
-        host.execute(command)
+        docker_run_wl = partial(host.execute, command)
+        retry_until_success(docker_run_wl)
         self.ip = host.execute(
             "docker inspect --format "
             "'{{.NetworkSettings.Networks.%s.IPAddress}}' %s"
