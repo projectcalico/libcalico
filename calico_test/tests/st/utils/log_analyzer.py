@@ -152,8 +152,8 @@ class LogAnalyzer(object):
             cmd = "cat %s" % self.filename
         else:
             _log.debug("Check appended logs")
-            cmd = "tail --lines=+%s %s" % (self.init_log_lines + 1,
-                                                self.filename)
+            cmd = "tail -n +%s %s" % (self.init_log_lines + 1,
+                                      self.filename)
 
         return self._extract_logs(cmd, logfilter=logfilter)
 
