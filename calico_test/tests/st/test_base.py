@@ -327,7 +327,7 @@ class TestBase(TestCase):
         for la in self.log_analyzers:
             logger.debug("Analyzing logs from %s on %s",
                          la.filename, la.host.name)
-            errors = la.get_latestloggers(logfilter=self.log_filter_in_errors)
+            errors = la.get_latest_logs(logfilter=self.log_filter_in_errors)
             errors_to_print = 100
             if errors:
                 hit_errors = True
