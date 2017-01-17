@@ -2,6 +2,8 @@ from datetime import datetime
 import logging
 import re
 
+from tests.st.utils.exceptions import CommandExecError
+
 _log = logging.getLogger(__name__)
 
 
@@ -114,15 +116,18 @@ class LogAnalyzer(object):
         """
         cmd = "wc -l %s" % self.filename
         lines = None
-        status, stdout, _ = self.host.execute(cmd)
+        stdout = None
+        try:
+            stdout = self.host.execute(cmd)
+        except CommandExecError:
+            _log.debug("Error running command: %s", cmd)
 
-        if not status:
-            _log.debug("Extract number of lines in file: %s",
-                       self.filename)
-            try:
-                lines = int(stdout.split(" ")[0])
-            except ValueError:
-                _log.error("Unable to parse output: %s", stdout)
+        _log.debug("Extract number of lines in file: %s",
+                   self.filename)
+        try:
+            lines = int(stdout.split(" ")[0])
+        except ValueError:
+            _log.error("Unable to parse output: %s", stdout)
 
         return lines
 
