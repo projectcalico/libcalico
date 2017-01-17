@@ -363,7 +363,7 @@ class TestBase(TestCase):
         # blacklisted logs.  Note that the log blacklist is regarded as
         # a set of known misbehaving logs and so for tests where we are _not_
         # skipping known failures we will not blacklist those logs.
-        if is_error and self.SKIP_KNOWN_FAILURES:
+        if is_error:
             is_error = not any(txt in log.msg for txt in self.IGNORE_LOGS_LIST)
 
         return not is_error
