@@ -326,17 +326,17 @@ class TestBase(TestCase):
         hit_errors = False
         for la in self.log_analyzers:
             logger.debug("Analyzing logs from %s on %s",
-                         la.filename, la.ssh.fqdn)
+                         la.filename, la.host.name)
             errors = la.get_latestloggers(logfilter=self.log_filter_in_errors)
             errors_to_print = 100
             if errors:
                 hit_errors = True
                 logger.error("***** Start of errors in logs from %s on %s *****"
                              "\n\n%s\n\n",
-                             la.filename, la.ssh.fqdn,
+                             la.filename, la.host.name,
                              "\n\n".join(map(str, errors)))
                 logger.error("****** End of errors in logs from %s on %s ******",
-                             la.filename, la.ssh.fqdn)
+                             la.filename, la.host.name)
                 errors_to_print -= 1
                 if errors_to_print <= 0:
                     logger.error("Limited to 100 errors reported")
