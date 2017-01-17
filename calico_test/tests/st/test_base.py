@@ -11,17 +11,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import errno
 import json
-import yaml
 import logging
+import os   
+import re
 import subprocess
+import time
+from multiprocessing.dummy import Pool as ThreadPool
 from pprint import pformat
 from unittest import TestCase
 
+import yaml
 from deepdiff import DeepDiff
-from multiprocessing.dummy import Pool as ThreadPool
-from tests.st.utils.log_analyzer import LogAnalyzer
 
+from tests.st.utils.log_analyzer import LogAnalyzer
 from tests.st.utils.utils import (get_ip, ETCD_SCHEME, ETCD_CA, ETCD_CERT,
                                   ETCD_KEY, debug_failures, ETCD_HOSTNAME_SSL)
 
@@ -44,11 +48,24 @@ FELIX_LOG_FORMAT = (
 
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
+LOCAL_DIAGS_DIR = "./diags"
+# DIAGS_SCRIPT = "/code/dist/calicoctl node diags"
+DIAGS_SCRIPT = "ls"  # Dummy diags script for now
+DIAGS_RE = re.compile("Diags saved to \\\"(.*)\\\" and "
+                      "compressed to \\\"(.*)\\\"")
+
+LOGS_IGNORE_ALL_TESTS = [
+]
+
+first_log_time = None
+
 
 class TestBase(TestCase):
     """
     Base class for test-wide methods.
     """
+    IGNORE_LOGS_LIST = LOGS_IGNORE_ALL_TESTS
+    first_log_time = None
 
     def setUp(self):
         """
@@ -358,12 +375,103 @@ class TestBase(TestCase):
         specified in the IGNORE_LOGS_LIST.
         """
         is_error = log.level in {"ERROR", "PANIC", "FATAL", "CRITICAL"}
-
-        # ... except unless the error message matches any of the text in our
-        # blacklisted logs.  Note that the log blacklist is regarded as
-        # a set of known misbehaving logs and so for tests where we are _not_
-        # skipping known failures we will not blacklist those logs.
-        if is_error:
-            is_error = not any(txt in log.msg for txt in self.IGNORE_LOGS_LIST)
+        logger.debug("log.level = %s", log.level)
+        logger.debug("is_error = %s", is_error)
 
         return not is_error
+
+    @classmethod
+    def on_failure(cls, test_id=None):
+        """
+        If a test fails, collect diagnostics by running diags.sh from the
+        calico repo on each host.
+        """
+        logger.info("Gather diagnostics from failure")
+        ensure_dir_exists(LOCAL_DIAGS_DIR)
+
+        for host in cls.hosts:
+            try:
+                cls.gather_diags_for_host(host, test_id=test_id)
+            except Exception:
+                logger.exception("Failed to run calico-diags")
+
+    @classmethod
+    def gather_diags_for_host(cls, host, test_id=None):
+        """
+        Gather diagnostics from the specified node and gather the diags (using
+        a filename based on the test and host).
+
+        :param host: The node to gather diagnostics from
+        """
+        pass
+        # with host:
+        #     results = host.execute(DIAGS_SCRIPT)
+        #     if results.return_code:
+        #         raise Exception("Error gathering diags:\nrc=%s\nstdout=%s\nstderr=%s" %
+        #                         (results.return_code, results.stdout, results.stderr))
+        #
+        #     output_match = DIAGS_RE.search(results.stdout)
+        #     if not output_match:
+        #         raise Exception("No diags files declared:\nrc=%s\nstdout=%s\nstderr=%s" %
+        #                         (results.return_code, results.stdout, results.stderr))
+        #
+        #     # Download the tar archive.
+        #     output_dir = output_match.group(1)
+        #     output_tar = output_match.group(2)
+        #
+        #     if not output_dir:
+        #         raise Exception("Diags output directory is blank")
+        #     if not output_tar:
+        #         raise Exception("Diags output tar is blank")
+        #
+        #     filename = "%s.%s.tar.xz" % (test_id or cls.__name__, host.vmname)
+        #     local_filename = os.path.join(LOCAL_DIAGS_DIR, filename)
+        #     host.get_file(output_tar, local_filename)
+        #     logger.debug("Downloaded diags to %s", local_filename)
+        #
+        #     # Diags downloaded, now delete them.  Sanity check that the output
+        #     # dir does not have a leading file separator (it should be a
+        #     # relative path and we don't want to delete the file system
+        #     # accidentally)
+        #     if "*" in output_tar:
+        #         raise Exception("Output tar contains a *")
+        #     host.execute("sudo rm %s" % output_tar)
+        #     if not output_dir.startswith(os.path.sep + "tmp" + os.path.sep):
+        #         raise Exception("Output directory from diags script MUST "
+        #                         "start with /tmp/")
+        #     if "*" in output_dir:
+        #         raise Exception("Output dir contains a *")
+        #     host.execute("sudo rm -r %s" % output_dir)
+
+    @staticmethod
+    def log_banner(msg, *args, **kwargs):
+        time_now = time.time()
+        first_log_time = time_now
+        time_now -= first_log_time
+        elapsed_hms = "%02d:%02d:%02d " % (time_now / 3600,
+                                           (time_now % 3600) / 60,
+                                           time_now % 60)
+
+        level = kwargs.pop("level", logging.INFO)
+        msg = elapsed_hms + str(msg) % args
+        banner = "+" + ("-" * (len(msg) + 2)) + "+"
+        logger.log(level, "\n" +
+                   banner + "\n"
+                            "| " + msg + " |\n" +
+                   banner)
+
+
+def ensure_dir_exists(path):
+    """
+    Ensure the supplied directory exists on the local server by creating it
+    if it doesn't.
+
+    :param path: The directory to create.
+    """
+    try:
+        os.makedirs(path)
+    except OSError as e:  # Python >2.5
+        if e.errno == errno.EEXIST:
+            pass
+        else:
+            raise

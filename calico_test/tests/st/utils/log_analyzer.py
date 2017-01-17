@@ -125,9 +125,11 @@ class LogAnalyzer(object):
         _log.debug("Extract number of lines in file: %s",
                    self.filename)
         try:
-            lines = int(stdout.split(" ")[0])
+                lines = int(stdout.split(" ")[0])
         except ValueError:
             _log.error("Unable to parse output: %s", stdout)
+        except AttributeError:
+            _log.error("None output?: %s", stdout)
 
         return lines
 
