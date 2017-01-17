@@ -14,7 +14,7 @@
 import errno
 import json
 import logging
-import os   
+import os
 import re
 import subprocess
 import time
@@ -375,8 +375,6 @@ class TestBase(TestCase):
         specified in the IGNORE_LOGS_LIST.
         """
         is_error = log.level in {"ERROR", "PANIC", "FATAL", "CRITICAL"}
-        logger.debug("log.level = %s", log.level)
-        logger.debug("is_error = %s", is_error)
 
         return not is_error
 
