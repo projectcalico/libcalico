@@ -14,7 +14,7 @@
 import logging
 import os
 import uuid
-from subprocess import CalledProcessError
+import subprocess
 from functools import partial
 
 from utils import get_ip, log_and_run, retry_until_success, ETCD_SCHEME, \
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 CHECKOUT_DIR = os.getenv("HOST_CHECKOUT_DIR", "")
 if CHECKOUT_DIR == "":
     CHECKOUT_DIR = os.getcwd()
+
 
 class DockerHost(object):
     """
@@ -109,7 +110,7 @@ class DockerHost(object):
 
             # Make sure docker is up
             docker_ps = partial(self.execute, "docker ps")
-            retry_until_success(docker_ps, ex_class=CalledProcessError,
+            retry_until_success(docker_ps, ex_class=subprocess.CalledProcessError,
                                 retries=10)
             for command in post_docker_commands:
                 self.execute(command)
@@ -139,6 +140,38 @@ class DockerHost(object):
                                                          command)
 
         return log_and_run(command)
+
+    def execute_readline(self, command):
+        """
+        Execute a command and return individual lines as a generator.
+        Raises an exception if the return code is non-zero.  Stderr is ignored.
+
+        Use this rather than execute if the command outputs a large amount of
+        data that cannot be handled as a single string.
+
+        :return: Generator of individual lines.
+        """
+        logger.debug("Running command on %s", self.name)
+        logger.debug("  - Command: %s", command)
+        if self.dind:
+            command = self.escape_shell_single_quotes(command)
+            command = "docker exec -it %s sh -c '%s'" % (self.name,
+                                                         command)
+        logger.debug("Final command: %s", command)
+        proc = subprocess.Popen(command, stdout=subprocess.PIPE, shell=True)
+
+        try:
+            # Read and return one line at a time until no more data is
+            # returned.
+            for line in proc.stdout:
+                yield line
+        finally:
+            status = proc.wait()
+            logger.debug("- return: %s", status)
+
+        if status:
+            raise Exception("Command %s returned non-zero exit code %s" %
+                            (command, status))
 
     def calicoctl(self, command):
         """
@@ -237,7 +270,7 @@ class DockerHost(object):
         for workload in self.workloads:
             try:
                 self.execute("docker rm -f %s" % workload.name)
-            except CalledProcessError:
+            except subprocess.CalledProcessError:
                 # Make best effort attempt to clean containers. Don't fail the
                 # test if a container can't be removed.
                 pass
@@ -252,7 +285,7 @@ class DockerHost(object):
         cmd = "docker rmi $(docker images -qa)"
         try:
             self.execute(cmd)
-        except CalledProcessError:
+        except subprocess.CalledProcessError:
             # Best effort only.
             pass
 
@@ -266,7 +299,7 @@ class DockerHost(object):
         cmd = "docker rm -f $(docker ps -qa)"
         try:
             self.execute(cmd)
-        except CalledProcessError:
+        except subprocess.CalledProcessError:
             # Best effort only.
             pass
 

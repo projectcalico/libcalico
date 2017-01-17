@@ -20,6 +20,7 @@ from unittest import TestCase
 
 from deepdiff import DeepDiff
 from multiprocessing.dummy import Pool as ThreadPool
+from tests.st.utils.log_analyzer import LogAnalyzer
 
 from tests.st.utils.utils import (get_ip, ETCD_SCHEME, ETCD_CA, ETCD_CERT,
                                   ETCD_KEY, debug_failures, ETCD_HOSTNAME_SSL)
@@ -33,6 +34,15 @@ logger = logging.getLogger(__name__)
 # Disable spammy logging from the sh module
 sh_logger = logging.getLogger("sh")
 sh_logger.setLevel(level=logging.CRITICAL)
+
+FELIX_LOG_FORMAT = (
+    "(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).\d{0,3} "
+    "\\[(?P<loglevel>\w+)\\]"
+    "\\[(?P<pid>\d+)(/\d+)?\\] "
+    "(?P<logtext>.*)"
+)
+
+TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 class TestBase(TestCase):
@@ -57,6 +67,12 @@ class TestBase(TestCase):
 
         # Log a newline to ensure that the first log appears on its own line.
         logger.info("")
+
+    def attach_log_analyzer(self, host):
+        self.log_analyzers.append(LogAnalyzer(host,
+                                              "/var/log/calico/felix/current",
+                                              FELIX_LOG_FORMAT,
+                                              TIMESTAMP_FORMAT))
 
     @staticmethod
     def _conn_checker(args):
@@ -300,3 +316,54 @@ class TestBase(TestCase):
         Assert true, wrapped to allow debugging of failures.
         """
         assert b
+
+    def check_logs_for_exceptions(self):
+        """
+        Check the logs for any error level logs and raises an exception if
+        any are found.
+        """
+        logger.info("Checking logs for exceptions")
+        hit_errors = False
+        for la in self.log_analyzers:
+            logger.debug("Analyzing logs from %s on %s",
+                         la.filename, la.ssh.fqdn)
+            errors = la.get_latestloggers(logfilter=self.log_filter_in_errors)
+            errors_to_print = 100
+            if errors:
+                hit_errors = True
+                logger.error("***** Start of errors in logs from %s on %s *****"
+                             "\n\n%s\n\n",
+                             la.filename, la.ssh.fqdn,
+                             "\n\n".join(map(str, errors)))
+                logger.error("****** End of errors in logs from %s on %s ******",
+                             la.filename, la.ssh.fqdn)
+                errors_to_print -= 1
+                if errors_to_print <= 0:
+                    logger.error("Limited to 100 errors reported")
+                    break
+        if hit_errors:
+            self.on_failure()
+
+        assert not hit_errors, "Test suite failed due to errors raised in logs"
+
+    def log_filter_in_errors(self, log):
+        """
+        Return the log filter function used for filtering logs to leave behind
+        just the error logs that will cause a test to fail.
+
+        :return: True if the log is being filtered (i.e. is NOT an error log),
+         otherwise returns False (it is an error log).
+
+        Note that if we are skipping known failures, then ignore logs as
+        specified in the IGNORE_LOGS_LIST.
+        """
+        is_error = log.level in {"ERROR", "PANIC", "FATAL", "CRITICAL"}
+
+        # ... except unless the error message matches any of the text in our
+        # blacklisted logs.  Note that the log blacklist is regarded as
+        # a set of known misbehaving logs and so for tests where we are _not_
+        # skipping known failures we will not blacklist those logs.
+        if is_error and self.SKIP_KNOWN_FAILURES:
+            is_error = not any(txt in log.msg for txt in self.IGNORE_LOGS_LIST)
+
+        return not is_error
