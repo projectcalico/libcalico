@@ -15,7 +15,6 @@ import errno
 import json
 import logging
 import os
-import re
 import subprocess
 import time
 from multiprocessing.dummy import Pool as ThreadPool
@@ -48,12 +47,8 @@ FELIX_LOG_FORMAT = (
 
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
-LOCAL_DIAGS_DIR = "./diags"
-# DIAGS_SCRIPT = "/code/dist/calicoctl node diags"
-DIAGS_SCRIPT = "ls"  # Dummy diags script for now
-DIAGS_RE = re.compile("Diags saved to \\\"(.*)\\\" and "
-                      "compressed to \\\"(.*)\\\"")
-
+# This is the list of logs we should ignore for all tests.
+# Currently empty, but I'm sure we'll find some to add to it shortly.
 LOGS_IGNORE_ALL_TESTS = [
 ]
 
@@ -384,67 +379,15 @@ class TestBase(TestCase):
         If a test fails, collect diagnostics by running diags.sh from the
         calico repo on each host.
         """
-        logger.info("Gather diagnostics from failure")
-        ensure_dir_exists(LOCAL_DIAGS_DIR)
-
-        for host in cls.hosts:
-            try:
-                cls.gather_diags_for_host(host, test_id=test_id)
-            except Exception:
-                logger.exception("Failed to run calico-diags")
-
-    @classmethod
-    def gather_diags_for_host(cls, host, test_id=None):
-        """
-        Gather diagnostics from the specified node and gather the diags (using
-        a filename based on the test and host).
-
-        :param host: The node to gather diagnostics from
-        """
-        pass
-        # with host:
-        #     results = host.execute(DIAGS_SCRIPT)
-        #     if results.return_code:
-        #         raise Exception("Error gathering diags:\nrc=%s\nstdout=%s\nstderr=%s" %
-        #                         (results.return_code, results.stdout, results.stderr))
-        #
-        #     output_match = DIAGS_RE.search(results.stdout)
-        #     if not output_match:
-        #         raise Exception("No diags files declared:\nrc=%s\nstdout=%s\nstderr=%s" %
-        #                         (results.return_code, results.stdout, results.stderr))
-        #
-        #     # Download the tar archive.
-        #     output_dir = output_match.group(1)
-        #     output_tar = output_match.group(2)
-        #
-        #     if not output_dir:
-        #         raise Exception("Diags output directory is blank")
-        #     if not output_tar:
-        #         raise Exception("Diags output tar is blank")
-        #
-        #     filename = "%s.%s.tar.xz" % (test_id or cls.__name__, host.vmname)
-        #     local_filename = os.path.join(LOCAL_DIAGS_DIR, filename)
-        #     host.get_file(output_tar, local_filename)
-        #     logger.debug("Downloaded diags to %s", local_filename)
-        #
-        #     # Diags downloaded, now delete them.  Sanity check that the output
-        #     # dir does not have a leading file separator (it should be a
-        #     # relative path and we don't want to delete the file system
-        #     # accidentally)
-        #     if "*" in output_tar:
-        #         raise Exception("Output tar contains a *")
-        #     host.execute("sudo rm %s" % output_tar)
-        #     if not output_dir.startswith(os.path.sep + "tmp" + os.path.sep):
-        #         raise Exception("Output directory from diags script MUST "
-        #                         "start with /tmp/")
-        #     if "*" in output_dir:
-        #         raise Exception("Output dir contains a *")
-        #     host.execute("sudo rm -r %s" % output_dir)
+        logger.info("Oh no - we've hit a failure!")
+        # In future, we should extend this function to collect diags...
 
     @staticmethod
     def log_banner(msg, *args, **kwargs):
+        global first_log_time
         time_now = time.time()
-        first_log_time = time_now
+        if first_log_time is None:
+            first_log_time = time_now
         time_now -= first_log_time
         elapsed_hms = "%02d:%02d:%02d " % (time_now / 3600,
                                            (time_now % 3600) / 60,
@@ -457,19 +400,3 @@ class TestBase(TestCase):
                    banner + "\n"
                             "| " + msg + " |\n" +
                    banner)
-
-
-def ensure_dir_exists(path):
-    """
-    Ensure the supplied directory exists on the local server by creating it
-    if it doesn't.
-
-    :param path: The directory to create.
-    """
-    try:
-        os.makedirs(path)
-    except OSError as e:  # Python >2.5
-        if e.errno == errno.EEXIST:
-            pass
-        else:
-            raise
