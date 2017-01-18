@@ -14,16 +14,15 @@
 import logging
 import os
 import uuid
-import subprocess
 from functools import partial
-from log_analyzer import LogAnalyzer, FELIX_LOG_FORMAT, TIMESTAMP_FORMAT
+from subprocess import CalledProcessError, Popen, PIPE
 
+from log_analyzer import LogAnalyzer, FELIX_LOG_FORMAT, TIMESTAMP_FORMAT
+from network import DockerNetwork
+from tests.st.utils.exceptions import CommandExecError
 from utils import get_ip, log_and_run, retry_until_success, ETCD_SCHEME, \
     ETCD_CA, ETCD_KEY, ETCD_CERT, ETCD_HOSTNAME_SSL
 from workload import Workload
-from network import DockerNetwork
-
-from tests.st.utils.exceptions import CommandExecError
 
 logger = logging.getLogger(__name__)
 # We want to default CHECKOUT_DIR if either the ENV var is unset
@@ -112,7 +111,7 @@ class DockerHost(object):
 
             # Make sure docker is up
             docker_ps = partial(self.execute, "docker ps")
-            retry_until_success(docker_ps, ex_class=subprocess.CalledProcessError,
+            retry_until_success(docker_ps, ex_class=CalledProcessError,
                                 retries=10)
             for command in post_docker_commands:
                 self.execute(command)
@@ -160,7 +159,7 @@ class DockerHost(object):
             command = "docker exec -it %s sh -c '%s'" % (self.name,
                                                          command)
         logger.debug("Final command: %s", command)
-        proc = subprocess.Popen(command, stdout=subprocess.PIPE, shell=True)
+        proc = Popen(command, stdout=PIPE, shell=True)
 
         try:
             # Read and return one line at a time until no more data is
@@ -277,7 +276,7 @@ class DockerHost(object):
         for workload in self.workloads:
             try:
                 self.execute("docker rm -f %s" % workload.name)
-            except subprocess.CalledProcessError:
+            except CalledProcessError:
                 # Make best effort attempt to clean containers. Don't fail the
                 # test if a container can't be removed.
                 pass
@@ -292,7 +291,7 @@ class DockerHost(object):
         cmd = "docker rmi $(docker images -qa)"
         try:
             self.execute(cmd)
-        except subprocess.CalledProcessError:
+        except CalledProcessError:
             # Best effort only.
             pass
 
@@ -306,7 +305,7 @@ class DockerHost(object):
         cmd = "docker rm -f $(docker ps -qa)"
         try:
             self.execute(cmd)
-        except subprocess.CalledProcessError:
+        except CalledProcessError:
             # Best effort only.
             pass
 
