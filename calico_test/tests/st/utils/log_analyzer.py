@@ -18,6 +18,7 @@ TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 # This is the list of logs we should ignore for all tests.
 # Currently empty, but I'm sure we'll find some to add to it shortly.
 LOGS_IGNORE_ALL_TESTS = [
+    "Failed to connect to syslog error=Unix syslog delivery error level=INFO",
 ]
 
 
@@ -295,5 +296,7 @@ class LogAnalyzer(object):
         specified in the IGNORE_LOGS_LIST.
         """
         is_error = log.level in {"ERROR", "PANIC", "FATAL", "CRITICAL"}
+        if is_error:
+            is_error = not any(txt in log.msg for txt in LOGS_IGNORE_ALL_TESTS)
 
         return not is_error
