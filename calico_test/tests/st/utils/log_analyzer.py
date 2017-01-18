@@ -93,9 +93,9 @@ class LogAnalyzer(object):
         self.continuation_level = continuation_level
 
         # Store the time of the last log in the file.
-        self._init_log_info()
+        self.reset()
 
-    def _init_log_info(self):
+    def reset(self):
         """
         Initialise the time of the first log in the log file and the number
         of lines in the log file.
@@ -103,6 +103,7 @@ class LogAnalyzer(object):
         This information is used to work out where to start from when looking
         at new logs.
         """
+        _log.debug("Resetting log analyzer on %s", self.host.name)
         # Grab the time of the first log.
         self.init_log_time = self._get_first_log_time()
         _log.debug("First log has timestamp: %s", self.init_log_time)

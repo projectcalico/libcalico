@@ -225,7 +225,9 @@ class DockerHost(object):
 
         cmd = ' '.join(args)
         self.calicoctl(cmd)
-        # Attach a log analyzer
+        self.attach_log_analyzer()
+
+    def attach_log_analyzer(self):
         self.log_analyzer = LogAnalyzer(self,
                                         "/var/log/calico/felix/current",
                                         FELIX_LOG_FORMAT,

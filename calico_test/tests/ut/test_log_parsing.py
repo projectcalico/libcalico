@@ -146,10 +146,10 @@ class MultiHostIpfix(TestBase):
                                     additional_docker_options=ADDITIONAL_DOCKER_OPTIONS,
                                     post_docker_commands=POST_DOCKER_COMMANDS,
                                     start_calico=False))
-        cls.log_analyzers = []
         for host in cls.hosts:
             host.execute("mkdir -p /var/log/calico/felix/")
             host.writefile(felix_logfile, before_data)
+            host.attach_log_analyzer()
         cls.expect_errors = False
 
     @classmethod
@@ -164,23 +164,17 @@ class MultiHostIpfix(TestBase):
         # every test.
         self.log_banner("starting %s", self._testMethodName)
 
-        _log.debug("Setup Log Analyzers")
-        # Clear up any existing LAs
-        while len(self.log_analyzers) > 0:
-            la = self.log_analyzers.pop()
-            _log.debug("Deleting log analyzer from %s", la.host.name)
-            del la
-        # Create new ones
+        _log.debug("Reset Log Analyzers")
         for host in self.hosts:
-            _log.info("Attaching LA for host %s", host.name)
-            self.attach_log_analyzer(host)
+            host.log_analyzer.reset()
 
     def tearDown(self):
         _log.info("Checking logs for exceptions")
         failed = False
         if self.expect_errors:
             try:
-                self.check_logs_for_exceptions()
+                for host in self.hosts:
+                    host.log_analyzer.check_logs_for_exceptions()
                 _log.debug("No exceptions found, setting failed=True")
                 failed = True
             except AssertionError:
@@ -188,7 +182,8 @@ class MultiHostIpfix(TestBase):
             _log.debug("Failed = %s", failed)
             assert not failed, "Did not hit error! Fail."
         else:
-            self.check_logs_for_exceptions()
+            for host in self.hosts:
+                host.log_analyzer.check_logs_for_exceptions()
 
     def test_no_logs(self):
         """
