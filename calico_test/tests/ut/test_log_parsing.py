@@ -72,6 +72,7 @@ before_data = """2017-01-12 19:19:04.419 [INFO][87] ipip_mgr.go 75: Setting loca
 2017-01-12 19:19:04.421 [INFO][87] syncer.go 500: Watcher is out-of-sync but no snapshot in progress, starting one.
 """
 
+
 def parallel_host_setup(num_hosts):
     makehost = functools.partial(DockerHost,
                                  additional_docker_options=ADDITIONAL_DOCKER_OPTIONS,
@@ -164,12 +165,17 @@ class MultiHostIpfix(TestBase):
         self.log_banner("starting %s", self._testMethodName)
 
         _log.debug("Setup Log Analyzers")
+        # Clear up any existing LAs
+        while len(self.log_analyzers) > 0:
+            la = self.log_analyzers.pop()
+            _log.debug("Deleting log analyzer from %s", la.host.name)
+            del la
+        # Create new ones
         for host in self.hosts:
             _log.info("Attaching LA for host %s", host.name)
             self.attach_log_analyzer(host)
 
     def tearDown(self):
-        # import pdb; pdb.set_trace()
         _log.info("Checking logs for exceptions")
         failed = False
         if self.expect_errors:
@@ -184,10 +190,6 @@ class MultiHostIpfix(TestBase):
         else:
             self.check_logs_for_exceptions()
 
-        while len(self.log_analyzers) > 0:
-            la = self.log_analyzers.pop()
-            del la
-
     def test_no_logs(self):
         """
         Tests that the scenario with no new logs works OK
@@ -201,6 +203,12 @@ class MultiHostIpfix(TestBase):
          True),
         ("INFO",
          "2017-01-12 19:19:05.421 [INFO][87] syncer.go 500: Watcher is out-of-sync.",
+         False),
+        ("Wrong1",
+         "2017-01-12 19:19:05.421 [INFO][87] syncer.go 500: Watcher is out-of-sync.",
+         True),
+        ("Wrong2",
+         "2017-01-12 19:19:05.421 [ERROR][87] syncer.go 500: Watcher is out-of-sync.",
          False),
     ])
     def test_newlog(self, name, log, expect_error):
