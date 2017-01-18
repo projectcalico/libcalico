@@ -16,6 +16,7 @@ import os
 import uuid
 import subprocess
 from functools import partial
+from log_analyzer import LogAnalyzer, FELIX_LOG_FORMAT, TIMESTAMP_FORMAT
 
 from utils import get_ip, log_and_run, retry_until_success, ETCD_SCHEME, \
     ETCD_CA, ETCD_KEY, ETCD_CERT, ETCD_HOSTNAME_SSL
@@ -61,6 +62,7 @@ class DockerHost(object):
         self.dind = dind
         self.workloads = set()
         self.ip = None
+        self.log_analyzer = None
         """
         An IP address value to pass to calicoctl as `--ip`. If left as None,
         no value will be passed, forcing calicoctl to do auto-detection.
@@ -224,6 +226,11 @@ class DockerHost(object):
 
         cmd = ' '.join(args)
         self.calicoctl(cmd)
+        # Attach a log analyzer
+        self.log_analyzer = LogAnalyzer(self,
+                                        "/var/log/calico/felix/current",
+                                        FELIX_LOG_FORMAT,
+                                        TIMESTAMP_FORMAT)
 
     def start_calico_node_with_docker(self):
         """
@@ -320,6 +327,8 @@ class DockerHost(object):
         volumes.
         :return:
         """
+        # Check for logs before tearing down
+        self.log_analyzer.check_logs_for_exceptions()
         logger.info("# Cleaning up host %s", self.name)
         if self.dind:
             # For Docker-in-Docker, we need to remove all containers and

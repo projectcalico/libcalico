@@ -6,6 +6,20 @@ from tests.st.utils.exceptions import CommandExecError
 
 _log = logging.getLogger(__name__)
 
+FELIX_LOG_FORMAT = (
+    "(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).\d{0,3} "
+    "\\[(?P<loglevel>\w+)\\]"
+    "\\[(?P<pid>\d+)(/\d+)?\\] "
+    "(?P<logtext>.*)"
+)
+
+TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+# This is the list of logs we should ignore for all tests.
+# Currently empty, but I'm sure we'll find some to add to it shortly.
+LOGS_IGNORE_ALL_TESTS = [
+]
+
 
 class Log(object):
     """
@@ -242,3 +256,43 @@ class LogAnalyzer(object):
         # through the filter.
         log = Log(timestamp, loglevel, pid, logtext)
         return log
+
+    def check_logs_for_exceptions(self):
+        """
+        Check the logs for any error level logs and raises an exception if
+        any are found.
+        """
+        _log.info("Checking logs for exceptions")
+        hit_errors = False
+        _log.debug("Analyzing logs from %s on %s",
+                   self.filename, self.host.name)
+        errors = self.get_latest_logs(logfilter=self.log_filter_in_errors)
+        errors_to_print = 100
+        if errors:
+            hit_errors = True
+            _log.error("***** Start of errors in logs from %s on %s *****"
+                       "\n\n%s\n\n",
+                       self.filename, self.host.name,
+                       "\n\n".join(map(str, errors)))
+            _log.error("****** End of errors in logs from %s on %s ******",
+                       self.filename, self.host.name)
+            errors_to_print -= 1
+            if errors_to_print <= 0:
+                _log.error("Limited to 100 errors reported")
+        assert not hit_errors, "Test suite failed due to errors raised in logs"
+
+    @staticmethod
+    def log_filter_in_errors(log):
+        """
+        Return the log filter function used for filtering logs to leave behind
+        just the error logs that will cause a test to fail.
+
+        :return: True if the log is being filtered (i.e. is NOT an error log),
+         otherwise returns False (it is an error log).
+
+        Note that if we are skipping known failures, then ignore logs as
+        specified in the IGNORE_LOGS_LIST.
+        """
+        is_error = log.level in {"ERROR", "PANIC", "FATAL", "CRITICAL"}
+
+        return not is_error
