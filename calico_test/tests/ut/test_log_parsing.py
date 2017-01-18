@@ -204,12 +204,6 @@ class MultiHostIpfix(TestBase):
         ("INFO",
          "2017-01-12 19:19:05.421 [INFO][87] syncer.go 500: Watcher is out-of-sync.",
          False),
-        ("Wrong1",
-         "2017-01-12 19:19:05.421 [INFO][87] syncer.go 500: Watcher is out-of-sync.",
-         True),
-        ("Wrong2",
-         "2017-01-12 19:19:05.421 [ERROR][87] syncer.go 500: Watcher is out-of-sync.",
-         False),
     ])
     def test_newlog(self, name, log, expect_error):
         """
