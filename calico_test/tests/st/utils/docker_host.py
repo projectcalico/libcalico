@@ -329,7 +329,9 @@ class DockerHost(object):
         :return:
         """
         # Check for logs before tearing down
-        self.log_analyzer.check_logs_for_exceptions()
+        if self.log_analyzer is not None:
+            self.log_analyzer.check_logs_for_exceptions()
+
         logger.info("# Cleaning up host %s", self.name)
         if self.dind:
             # For Docker-in-Docker, we need to remove all containers and
