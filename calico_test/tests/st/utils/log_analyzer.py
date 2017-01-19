@@ -231,6 +231,9 @@ class LogAnalyzer(object):
         :return: The log that was added or updated by this method.  This may
         return None if no log was added or updated.
         """
+        # Put the full text of the log into logtext, but strip off ending whitespace because
+        # we'll add \n back to it when we append to it
+        logtext = line.rstrip()
         # Strip superfluous whitespace
         line = line.strip()
 
@@ -251,7 +254,6 @@ class LogAnalyzer(object):
         timestamp = datetime.strptime(groupdict["timestamp"],
                                       self.timestamp_format)
         pid = groupdict["pid"]
-        logtext = groupdict["logtext"]
 
         # Neutron logs use a log level of TRACE to continue a multi-line
         # log.  If there was no previous log then we must have starting parsing
