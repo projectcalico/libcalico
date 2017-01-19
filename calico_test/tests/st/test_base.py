@@ -12,14 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import json
-import yaml
 import logging
 import subprocess
+import time
+from multiprocessing.dummy import Pool as ThreadPool
 from pprint import pformat
 from unittest import TestCase
 
+import yaml
 from deepdiff import DeepDiff
-from multiprocessing.dummy import Pool as ThreadPool
 
 from tests.st.utils.utils import (get_ip, ETCD_SCHEME, ETCD_CA, ETCD_CERT,
                                   ETCD_KEY, debug_failures, ETCD_HOSTNAME_SSL)
@@ -33,6 +34,8 @@ logger = logging.getLogger(__name__)
 # Disable spammy logging from the sh module
 sh_logger = logging.getLogger("sh")
 sh_logger.setLevel(level=logging.CRITICAL)
+
+first_log_time = None
 
 
 class TestBase(TestCase):
@@ -300,3 +303,22 @@ class TestBase(TestCase):
         Assert true, wrapped to allow debugging of failures.
         """
         assert b
+
+    @staticmethod
+    def log_banner(msg, *args, **kwargs):
+        global first_log_time
+        time_now = time.time()
+        if first_log_time is None:
+            first_log_time = time_now
+        time_now -= first_log_time
+        elapsed_hms = "%02d:%02d:%02d " % (time_now / 3600,
+                                           (time_now % 3600) / 60,
+                                           time_now % 60)
+
+        level = kwargs.pop("level", logging.INFO)
+        msg = elapsed_hms + str(msg) % args
+        banner = "+" + ("-" * (len(msg) + 2)) + "+"
+        logger.log(level, "\n" +
+                   banner + "\n"
+                            "| " + msg + " |\n" +
+                   banner)

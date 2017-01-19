@@ -14,15 +14,15 @@
 import logging
 import os
 import uuid
-from subprocess import CalledProcessError
 from functools import partial
+from subprocess import CalledProcessError, Popen, PIPE
 
+from log_analyzer import LogAnalyzer, FELIX_LOG_FORMAT, TIMESTAMP_FORMAT
+from network import DockerNetwork
+from tests.st.utils.exceptions import CommandExecError
 from utils import get_ip, log_and_run, retry_until_success, ETCD_SCHEME, \
     ETCD_CA, ETCD_KEY, ETCD_CERT, ETCD_HOSTNAME_SSL
 from workload import Workload
-from network import DockerNetwork
-
-from tests.st.utils.exceptions import CommandExecError
 
 logger = logging.getLogger(__name__)
 # We want to default CHECKOUT_DIR if either the ENV var is unset
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 CHECKOUT_DIR = os.getenv("HOST_CHECKOUT_DIR", "")
 if CHECKOUT_DIR == "":
     CHECKOUT_DIR = os.getcwd()
+
 
 class DockerHost(object):
     """
@@ -60,6 +61,7 @@ class DockerHost(object):
         self.dind = dind
         self.workloads = set()
         self.ip = None
+        self.log_analyzer = None
         """
         An IP address value to pass to calicoctl as `--ip`. If left as None,
         no value will be passed, forcing calicoctl to do auto-detection.
@@ -140,6 +142,38 @@ class DockerHost(object):
 
         return log_and_run(command)
 
+    def execute_readline(self, command):
+        """
+        Execute a command and return individual lines as a generator.
+        Raises an exception if the return code is non-zero.  Stderr is ignored.
+
+        Use this rather than execute if the command outputs a large amount of
+        data that cannot be handled as a single string.
+
+        :return: Generator of individual lines.
+        """
+        logger.debug("Running command on %s", self.name)
+        logger.debug("  - Command: %s", command)
+        if self.dind:
+            command = self.escape_shell_single_quotes(command)
+            command = "docker exec -it %s sh -c '%s'" % (self.name,
+                                                         command)
+        logger.debug("Final command: %s", command)
+        proc = Popen(command, stdout=PIPE, shell=True)
+
+        try:
+            # Read and return one line at a time until no more data is
+            # returned.
+            for line in proc.stdout:
+                yield line
+        finally:
+            status = proc.wait(timeout=10)
+            logger.debug("- return: %s", status)
+
+        if status:
+            raise Exception("Command %s returned non-zero exit code %s" %
+                            (command, status))
+
     def calicoctl(self, command):
         """
         Convenience function for abstracting away calling the calicoctl
@@ -191,6 +225,13 @@ class DockerHost(object):
 
         cmd = ' '.join(args)
         self.calicoctl(cmd)
+        self.attach_log_analyzer()
+
+    def attach_log_analyzer(self):
+        self.log_analyzer = LogAnalyzer(self,
+                                        "/var/log/calico/felix/current",
+                                        FELIX_LOG_FORMAT,
+                                        TIMESTAMP_FORMAT)
 
     def start_calico_node_with_docker(self):
         """
@@ -287,6 +328,10 @@ class DockerHost(object):
         volumes.
         :return:
         """
+        # Check for logs before tearing down
+        if self.log_analyzer is not None:
+            self.log_analyzer.check_logs_for_exceptions()
+
         logger.info("# Cleaning up host %s", self.name)
         if self.dind:
             # For Docker-in-Docker, we need to remove all containers and
