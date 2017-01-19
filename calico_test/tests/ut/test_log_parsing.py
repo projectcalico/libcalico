@@ -11,24 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import copy
-import functools
-import json
 import logging
-import netaddr
-import subprocess
-import time
-import unittest
-import yaml
+
 from nose_parameterized import parameterized
-from multiprocessing.dummy import Pool
 
 from tests.st.test_base import TestBase
-from tests.st.enterprise.utils.ipfix_monitor import IpfixFlow, IpfixMonitor
 from tests.st.utils.docker_host import DockerHost
-from tests.st.utils.exceptions import CommandExecError
-from tests.st.utils.utils import assert_network, assert_profile, \
-    assert_number_endpoints, get_profile_name, ETCD_CA, ETCD_CERT, \
+from tests.st.utils.utils import ETCD_CA, ETCD_CERT, \
     ETCD_KEY, ETCD_HOSTNAME_SSL, ETCD_SCHEME, get_ip
 
 _log = logging.getLogger(__name__)
@@ -73,69 +62,10 @@ before_data = """2017-01-12 19:19:04.419 [INFO][87] ipip_mgr.go 75: Setting loca
 """
 
 
-def parallel_host_setup(num_hosts):
-    makehost = functools.partial(DockerHost,
-                                 additional_docker_options=ADDITIONAL_DOCKER_OPTIONS,
-                                 post_docker_commands=POST_DOCKER_COMMANDS,
-                                 start_calico=False)
-    hostnames = []
-    for i in range(num_hosts):
-        hostnames.append("host%s" % i)
-    pool = Pool(num_hosts)
-    hosts = pool.map(makehost, hostnames)
-    pool.close()
-    pool.join()
-    return hosts
-
-
-def wipe_etcd():
-    _log.debug("Wiping etcd")
-    # Delete /calico if it exists. This ensures each test has an empty data
-    # store at start of day.
-    curl_etcd(get_ip(), "calico", options=["-XDELETE"])
-
-    # Disable Usage Reporting to usage.projectcalico.org
-    # We want to avoid polluting analytics data with unit test noise
-    curl_etcd(get_ip(),
-              "calico/v1/config/UsageReportingEnabled",
-              options=["-XPUT -d value=False"])
-    curl_etcd(get_ip(),
-              "calico/v1/config/LogSeverityScreen",
-              options=["-XPUT -d value=debug"])
-
-
-def curl_etcd(ip, path, options=None, recursive=True):
-    """
-    Perform a curl to etcd, returning JSON decoded response.
-    :param ip: IP address of etcd server
-    :param path:  The key path to query
-    :param options:  Additional options to include in the curl
-    :param recursive:  Whether we want recursive query or not
-    :return:  The JSON decoded response.
-    """
-    if options is None:
-        options = []
-    if ETCD_SCHEME == "https":
-        # Etcd is running with SSL/TLS, require key/certificates
-        command = "curl --cacert %s --cert %s --key %s " \
-                  "-sL https://%s:2379/v2/keys/%s?recursive=%s %s" % \
-                  (ETCD_CA, ETCD_CERT, ETCD_KEY, ETCD_HOSTNAME_SSL, path,
-                   str(recursive).lower(), " ".join(options))
-    else:
-        command = "curl -sL http://%s:2379/v2/keys/%s?recursive=%s %s" % \
-                  (ip, path, str(recursive).lower(), " ".join(options))
-    _log.debug("Running: %s", command)
-    rc = subprocess.check_output(command, shell=True)
-    return json.loads(rc.strip())
-
-
-class MultiHostIpfix(TestBase):
+class LogParsing(TestBase):
     @classmethod
     def setUpClass(cls):
         cls.log_banner("TEST SET UP STARTING: %s", cls.__name__)
-
-        # Wipe etcd before setting up a new test rig for this class.
-        wipe_etcd()
 
         cls.hosts = []
         cls.hosts.append(DockerHost("host1",
@@ -160,8 +90,6 @@ class MultiHostIpfix(TestBase):
             del host
 
     def setUp(self):
-        # This method is REQUIRED or else the TestBase setUp() method will wipe etcd before
-        # every test.
         self.log_banner("starting %s", self._testMethodName)
 
         _log.debug("Reset Log Analyzers")

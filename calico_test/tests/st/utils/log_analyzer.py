@@ -1,3 +1,17 @@
+# Copyright (c) 2015-2017 Tigera, Inc. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.ra, Inc. All rights reserved.
+
 from datetime import datetime
 import logging
 import re
@@ -16,10 +30,9 @@ FELIX_LOG_FORMAT = (
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # This is the list of logs we should ignore for all tests.
-# Currently empty, but I'm sure we'll find some to add to it shortly.
 LOGS_IGNORE_ALL_TESTS = [
-    "Failed to connect to syslog error=Unix syslog delivery error level=INFO",
-]
+    "Failed to connect to syslog error=Unix syslog delivery error level=",
+    ]
 
 
 class Log(object):
