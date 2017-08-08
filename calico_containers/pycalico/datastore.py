@@ -18,7 +18,6 @@ import uuid
 import etcd
 import re
 
-import etcd
 from netaddr import IPNetwork, IPAddress, AddrFormatError
 
 from pycalico.datastore_datatypes import Rules, BGPPeer, IPPool, \
@@ -1037,7 +1036,7 @@ class DatastoreClient(object):
     @handle_errors
     def get_profile_names(self):
         """
-        Get the all configured profiles.
+        Get all configured profiles.
         :return: a set of profile names
         """
         profiles = set()
@@ -1406,7 +1405,7 @@ class DatastoreClient(object):
 
         :return: (Boolean) Whether the BGP node mesh is enabled.
         """
-        # The default value is stored in etcd, however it is only initialised
+        # The default value is stored in etcd. However, it is only initialised
         # during node instantiation.  Therefore, if the value is not present
         # return the default value.  The default should match the value
         # assigned in ensure_global_config().
@@ -1432,7 +1431,7 @@ class DatastoreClient(object):
 
         :return: The default node BGP AS Number as a string.
         """
-        # The default value is stored in etcd, however it is only initialised
+        # The default value is stored in etcd. However, it is only initialised
         # during node instantiation.  Therefore, if the value is not present
         # return the default value.  The default should match the value
         # assigned in ensure_global_config().
