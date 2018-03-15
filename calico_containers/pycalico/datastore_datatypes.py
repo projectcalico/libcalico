@@ -485,9 +485,9 @@ class Rule(dict):
 
         # Convert ports to integers.
         if "dst_ports" in json_dict:
-            json_dict["dst_ports"] = [int(p) for p in json_dict["dst_ports"]]
+            json_dict["dst_ports"] = [p for p in json_dict["dst_ports"]]
         if "src_ports" in json_dict:
-            json_dict["src_ports"] = [int(p) for p in json_dict["src_ports"]]
+            json_dict["src_ports"] = [p for p in json_dict["src_ports"]]
 
         return json_dict
 
